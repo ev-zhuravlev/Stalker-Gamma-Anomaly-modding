@@ -1,0 +1,910 @@
+--[[
+
+-- Created by Tronex
+-- Date: 2018/11/4
+-- Last Edit: 2020/3/19
+
+-- Item parts management and disassembly
+
+--]]
+
+
+ini_parts   = itms_manager.ini_parts
+spare_parts = utils_data.collect_section(ini_parts,"weapons_spare_parts")
+max_con_obj = nil
+min_con_obj = nil
+max_con     = nil
+min_con     = nil
+diff_con    = nil -- if condition difference between old and new state is less than this, don't re-evaluate parts condition
+disassembly_chance = nil
+weapon_upgrade_tool_drop_chance = nil
+outfit_upgrade_tool_drop_chance = nil
+
+d_flag      = false
+d_key       = "DIK_LMENU" -- Saftey key hold (Left Alt)
+
+local prt_val     = {}
+local prt_sign    = {}
+local prt_st      = {}
+
+local math_ceil   = math.ceil
+local math_floor  = math.floor
+local math_abs    = math.abs
+local string_find = string.find
+
+batch_disassembly_supported = {}
+batch_disassembly_enabled = nil
+batch_disassembly_always_shown = nil
+batch_disassembly_property_index = nil
+batch_disassembly_supported_containers = nil
+batch_disassembly_supported_modes = nil
+
+
+function init_settings()
+	max_con_obj = ini_parts:r_float_ex("settings","maximum_dissassembly_part_condition") or 0.999
+	min_con_obj = ini_parts:r_float_ex("settings","minimum_dissassembly_part_condition") or 0.001
+	max_con = ini_parts:r_float_ex("settings","maximum_evaluation_part_condition") or 99
+	min_con = ini_parts:r_float_ex("settings","minimum_evaluation_part_condition") or 1
+	diff_con = ini_parts:r_float_ex("settings","reevaluation_part_condition_difference") or 2
+	disassembly_chance  = ini_parts:r_float_ex("settings","disassembly_chance") or 40
+	weapon_upgrade_tool_drop_chance  = ini_parts:r_float_ex("settings","weapon_upgrade_tool_drop_chance") or 50
+	outfit_upgrade_tool_drop_chance  = ini_parts:r_float_ex("settings","outfit_upgrade_tool_drop_chance") or 50
+	batch_disassembly_enabled = ini_parts:r_bool_ex("settings", "batch_disassembly_enabled", true)
+	batch_disassembly_always_shown = ini_parts:r_bool_ex("settings", "batch_disassembly_always_shown", false)
+	batch_disassembly_property_index = ini_parts:r_u32("settings", "batch_disassembly_property_index") or 10
+	batch_disassembly_supported_containers = ini_parts:r_string_ex("settings", "batch_disassembly_supported_containers") or "actor_bag, npc_bag"
+	batch_disassembly_supported_modes = ini_parts:r_string_ex("settings", "batch_disassembly_supported_modes") or "inventory, loot"
+end
+
+----------------------------------------------------------------------
+-- UI Item Property
+----------------------------------------------------------------------
+function menu_disassembly(obj)
+	
+	if (is_disassemblable(obj)) then
+		return game.translate_string("st_awr_disassembly_cloth")
+	end
+	return
+end
+
+function func_disassembly(obj)
+	exec_disassembly_impl(false, {obj}, get_suitable_dtool(obj))
+end
+
+function menu_batch_disassembly(obj)
+	if (not batch_disassembly_enabled or not is_batch_disassemblable(obj)) then
+		return false
+	end
+
+	if not is_more_than_one_batch_of_type(obj) and not batch_disassembly_always_shown then
+		return false
+	end
+	return 'st_batch_breakdown'
+end
+
+function func_batch_disassembly(obj)
+	exec_disassembly_impl(true, find_all_items_of_type(obj), get_suitable_dtool(obj))
+	return
+end
+
+----------------------------------------------------------------------
+-- Disassembly
+----------------------------------------------------------------------
+
+function count_of_disassemblies(obj)
+	if IsItem("multiuse",nil,obj) then
+		return obj:get_remaining_uses()
+	elseif IsAmmo(obj) then
+		return 1 -- obj:ammo_get_count() is used ammo_maker but it does overrides Name_Custom
+				 -- and does not run this code. this will be returned only in vanilla
+	else
+		return 1
+	end
+end
+
+function count_of_batches(obj)
+	if IsItem("multiuse",nil,obj) then
+		return obj:get_remaining_uses()
+	else
+		return 1
+	end
+end
+
+function iterate_object_parent_inventory(obj, f)
+	local parent = obj:parent()
+	local is_box = IsInvbox(parent)
+	if is_box then
+		parent:iterate_inventory_box(f)
+	else
+		parent:iterate_ruck(f)
+	end
+end
+
+function iterate_items_of_same_type(obj, f)
+	local sec = obj:section()
+	
+	iterate_object_parent_inventory(obj, function(temp, item)
+		if item:section() == sec then
+			if f(obj) == false then
+				return
+			end
+		end
+	end)
+end
+
+function is_more_than_one_batch_of_type(obj)
+	local count = 0
+
+	iterate_items_of_same_type(obj, function(item)
+		count = count + count_of_batches(item)
+		if count > 1 then
+			return false
+		end
+	end)
+	return count > 1
+end
+
+function find_all_items_of_type(obj)
+	local res = {}
+	local sec = obj:section()
+	iterate_object_parent_inventory(obj, function(temp, item)
+		if item:section() == sec then
+			-- insert multiuse item several times to disassemble them completely
+			for i = 1,count_of_batches(obj) do 
+				table.insert(res, item)
+			end
+		end
+	end)
+	return res
+end
+
+function disassembly_item_object(obj, obj_d)
+	local sec = obj:section()
+	local con = obj:condition()
+	local itms_disassemble = GetItemList("disassemble")
+	
+	local result = {}
+	result.details = {}
+	result.conditions = {}
+
+	-- Collect disassemble parts of our item
+	local parts = ini_parts:r_string_ex("nor_parts_list",sec)
+	if (not parts) then 
+		printf("no parts")
+		return result
+	end
+	local parts_tbl = str_explode(parts,",")
+	
+	-- Add extra part on achievement
+	if (game_achievements.has_achievement("recycler")) and (math.random(1,100) <= 33) then
+		table.insert(parts_tbl, parts_tbl[math.random(#parts_tbl)])
+	end
+
+	-- Degrade or Delete disassemble item
+	local degr_val = itms_disassemble[obj_d:section()]
+	utils_item.degrade( obj_d , degr_val )
+		
+	-- Discharge/Delete disassembled item
+	utils_item.discharge( obj )
+	
+	-- Increase Statistic
+	game_statistics.increment_statistic("items_disassembled")
+	
+	-- Give disassemble parts
+	for i=1,#parts_tbl do
+		if ini_sys:section_exist(parts_tbl[i]) then
+			if IsItem("part",parts_tbl[i]) and utils_item.is_degradable(nil, parts_tbl[i]) then
+				table.insert(result.details, parts_tbl[i])
+				result.conditions[#result.details] = get_suitable_part_con(sec, con) * 100
+				printf("adding part %s to the result with condition %s", parts_tbl[i], result.conditions[#result.details])
+			else
+				printf("adding part %s to the result without condition", parts_tbl[i])
+				table.insert(result.details, parts_tbl[i])
+			end
+		end
+	end
+	
+	if IsItem("device", sec) and item_device.device_battery and item_device.is_device_charged(nil, sec, con) then
+		table.insert(result.details, item_device.device_battery)
+		result.conditions[#result.details] = con * 100
+	end
+
+	return result
+end
+
+function disassembly_weapon_spare_parts(sec, condition)
+	local single_handed = ini_sys:r_float_ex(sec,"single_handed") or 1
+	local weight = ini_sys:r_float_ex(sec,"inv_weight") or 2
+	local number,finale = 0,0
+	
+	number = math_floor(weight)
+	if (single_handed == 1) then number = 1 end
+	
+	for i=1,number do
+		if (math.random(100) < condition) then
+			finale = finale + 1
+		end
+	end
+	
+	return finale
+end
+
+function disassembly_weapon_object(obj, obj_d)
+
+	-- Defines
+	local id = obj:id()
+	local se_obj = alife_object(id)
+	local sec = obj:section()
+	local sec_p = ini_sys:r_string_ex(sec,"parent_section") or sec
+	local name = ui_item.get_sec_name(sec)
+	local con = obj:condition()
+	local parts = get_parts_con(obj, nil, true)
+
+	local result_details = {}
+	local result_conditions = {}
+	local with_scope = nil
+
+	-- Collect attachments
+	with_scope = utils_item.has_scope(sec)
+	if with_scope then
+		with_scope = string.format('_%s', utils_item.has_scope(sec))
+		table.insert(result_details, with_scope:sub(2))
+		sec = sec:gsub(with_scope, "")
+	end	
+	if (obj:weapon_scope_status() == 2) and (utils_item.addon_attached(obj,"sc")) then
+		local scope_section = utils_data.read_from_ini(nil,sec,"scopes_sect","string",nil)
+		local scope = utils_data.read_from_ini(nil,scope_section,"scope_name","string",nil)
+		table.insert(result_details, scope)
+	end
+	if (obj:weapon_silencer_status() == 2) and (utils_item.addon_attached(obj,"sl")) then
+		local sil = utils_data.read_from_ini(nil,sec,"silencer_name","string",nil)
+		table.insert(result_details, sil)
+	end	
+	if (obj:weapon_grenadelauncher_status() == 2) and (utils_item.addon_attached(obj,"gl")) then
+		local gl = utils_data.read_from_ini(nil,sec,"grenade_launcher_name","string",nil)
+		table.insert(result_details, gl)
+	end
+	
+	-- Unload mag and get ammo
+	obj:force_unload_magazine(true)
+	
+	-- Collect weapon parts
+	for k,v in pairs(parts) do
+		if (k ~= sec_p) and v > 0 and (math.random(100) <= (disassembly_chance + con*100)) then
+			local index = #result_details
+			result_details[index + 1] = k
+			result_conditions[index + 1] = IsItem("part",k) and utils_item.get_cond_static(v) or v
+		end
+	end
+	
+	-- Collect weapon spare parts
+	for i=1,#spare_parts do
+		local num = disassembly_weapon_spare_parts(sec, disassembly_chance/2)
+		if (num > 0) then
+			for j=1,num do
+				table.insert(result_details,spare_parts[i])
+			end
+		end
+	end
+	
+	-- Collect installed upgrades
+	local installed_upgrades = utils_item.get_upgrades_installed(obj)
+	local upgr_tools = {}
+	
+	for i=1,#installed_upgrades do
+		local tool = utils_item.get_upgrade_sect_tool(sec, installed_upgrades[i])
+		table.insert(upgr_tools,tool)
+	end
+	
+	for i=1,#upgr_tools do
+		if math.random(100) < con * weapon_upgrade_tool_drop_chance then
+			table.insert(result_details,upgr_tools[i])
+		end
+	end
+	
+	-- Release weapon
+	alife_release(se_obj)
+	
+	-- Degrade disassemble tool
+	local diss_tools = GetItemList("disassemble")
+	local degr_val = diss_tools[obj_d:section()]
+	utils_item.degrade( obj_d , degr_val )
+
+	-- Increase Statistic
+	game_statistics.increment_statistic("items_disassembled")
+	clear_parts_con(id)
+
+	return { details = result_details, conditions = result_conditions}
+end
+
+function disassembly_outfit_object(obj, obj_d)
+	-- Defines
+	local id = obj:id()
+	local sec = obj:section()
+	local name = ui_item.get_sec_name(sec)
+	local con = obj:condition()
+	local parts = get_parts_con(obj, nil, true)
+	local npc = obj:parent()
+	if (not npc) then
+		printf("~ item_parts | no owner found for [%s]", obj:name())
+		return
+	end
+	
+	local result_details = {}
+	local result_conditions = {}
+
+	-- Collect outfit parts
+	for k,v in pairs(parts) do
+		if (k ~= sec) and (math.random(100) <= (disassembly_chance + con*100)) then
+			local index = #result_details
+			result_details[index + 1] = k
+			result_conditions[index + 1] = v
+		end
+	end
+	
+	-- Collect installed upgrades
+	local installed_upgrades = utils_item.get_upgrades_installed(obj)
+	local upgr_tools = {}
+		
+	for i=1,#installed_upgrades do
+		local tool = utils_item.get_upgrade_sect_tool(sec, installed_upgrades[i])
+		table.insert(upgr_tools,tool)
+	end
+	
+	for i=1,#upgr_tools do
+		if math.random(100) < con * outfit_upgrade_tool_drop_chance then
+			table.insert(result_details,upgr_tools[i])
+		end
+	end
+	
+	-- Release outfit
+	alife_release(obj)
+	
+	-- Degrade or Delete disassemble item
+	local itms_disassemble = GetItemList("disassemble")
+	local degr_val = itms_disassemble[obj_d:section()]
+	utils_item.degrade( obj_d , degr_val )
+	
+	--Increase Statistic
+	game_statistics.increment_statistic("items_disassembled")
+	clear_parts_con(id)
+	gameplay_disguise.clear_patch(id)
+	
+	return { details = result_details, conditions = result_conditions}
+end
+
+function process_disassembly_weapon_results_pre_animation(results, section, npc_id)
+	actor_effects.play_item_fx("disassemble_metal_fast")
+end
+
+function process_disassembly_outfit_results_pre_animation(results, section, npc_id)
+	actor_effects.play_item_fx("disassemble_cloth_fast")
+end
+
+function process_disassembly_item_results_pre_animation(results, section, npc_id)
+	actor_effects.play_item_fx("disassemble_metal_fast")
+end
+
+function consolidate_results(results)
+	local details = {}
+	local conditions = {}
+	for i,r in ipairs(results) do
+		for j = 1,#r.details do
+			table.insert(details, r.details[j])
+			conditions[#details] = r.conditions[j]
+		end
+	end
+	return details, conditions
+end
+
+function process_disassemly_results_post_animation(results, section, npc, disassembly_text, clamp_conditions)
+	
+	printf("process_disassemly_results_post_animation, npc: %s", npc:name())
+	local is_batch_disassembly = #results > 1
+	local result_details, result_conditions = consolidate_results(results)
+	local name = ui_item.get_sec_name(section)
+	-- Send messages to the actor
+	if #result_details > 0 then
+		local parts_text = create_disassemble_list(result_details, is_batch_disassembly)
+		actor_menu.set_item_news('success', 'weapon_ammo', disassembly_text, name, game.translate_string('st_dis_text_9'), parts_text)
+	else
+		actor_menu.set_item_news('fail', 'weapon', "st_dis_text_10", name)
+	end
+	
+	-- Creating parts in inventory
+	for i=1,#result_details do
+		if result_conditions[i] and result_conditions[i] > 0 then
+			local se_result = alife_create(result_details[i], npc:position(), npc:level_vertex_id(), npc:game_vertex_id(), npc:id(), false)
+			local data_result = utils_stpk.get_item_data(se_result)
+			data_result.condition = result_conditions[i]/100
+			if clamp_conditions then
+				data_result.condition = clamp(data_result.condition, min_con_obj, max_con_obj)				
+			end
+			utils_stpk.set_item_data(data_result,se_result)
+			alife():register(se_result)
+		else
+			alife_create_item(result_details[i], npc)
+		end
+		async_utils.yield_to_timer_task(0, 0, "disassembly_post_animation_" .. i)
+	end
+	printf("items created")
+end
+
+function process_disassembly_weapon_results_post_animation(results, section, npc)
+	process_disassemly_results_post_animation(results, section, npc, "st_dis_text_7", true)
+end
+
+function process_disassembly_outfit_results_post_animation(results, section, npc)
+	process_disassemly_results_post_animation(results, section, npc, "st_dis_text_8", true)
+end
+
+function process_disassembly_item_results_post_animation(results, section, npc)
+	process_disassemly_results_post_animation(results, section, npc, "st_dis_text_11", false)
+end
+
+function is_disassemblable(obj)
+	local sec = obj:section()
+	sec = ini_sys:r_string_ex(sec,"parent_section") or sec -- for weapons with scopes
+
+	if not (ini_parts:r_string_ex("nor_parts_list",sec)
+	or ini_parts:r_string_ex("con_parts_list",sec))
+	then
+		return false
+	end
+	
+	if (string_find(sec, "(lead.-_box)",3)) then
+		return false
+	elseif (string_find(sec, "(af.-_iam)",3)) then
+		return false
+	elseif (string_find(sec, "(af.-_aac)",3)) then
+		return false
+	elseif (string_find(sec, "(af.-_aam)",3)) then
+		return false
+	end
+
+	return true
+end
+
+function is_batch_disassemblable(obj)
+	return is_disassemblable(obj)
+end
+
+function disassembly_impl(isBatch, objs, tool)
+
+	local first_obj = objs[1]
+
+	local is_weapon = IsWeapon(first_obj)
+	local is_outfit = IsOutfit(first_obj) or IsHeadgear(first_obj)
+
+	local section = first_obj:section()
+	local first_obj_id = first_obj:id()
+	local npc_id = first_obj:parent():id()
+	local npc = npc_id and get_object_by_id(npc_id)
+	if (not npc) then
+		printf("~ item_parts timer | no owner found")
+		return
+	end
+
+	local results = {}
+	for i = 1,#objs do
+		if i ~= 1 then
+			tool = get_suitable_dtool(obj)
+			if tool == nil then
+				break
+			end
+		end
+		printf("condition of tool is %s", tool:condition())
+
+		if is_weapon then
+			table.insert(results, disassembly_weapon_object(objs[i], tool))
+		elseif is_outfit then
+			table.insert(results, disassembly_outfit_object(objs[i], tool))
+		else
+			table.insert(results, disassembly_item_object(objs[i], tool))
+		end
+	end
+
+	if is_weapon then
+		process_disassembly_weapon_results_pre_animation(results, section, npc)
+	elseif is_outfit then		
+		process_disassembly_outfit_results_pre_animation(results, section, npc)
+	else
+		process_disassembly_item_results_pre_animation(results, section, npc)
+	end
+
+	local delay = actor_effects.is_animations_on() and 3 or 0
+	async_utils.yield_to_timer_task(delay, 0, "delay_disassembly" .. first_obj_id)
+	
+	if is_weapon then
+		process_disassembly_weapon_results_post_animation(results, section, npc)
+	elseif is_outfit then		
+		process_disassembly_outfit_results_post_animation(results, section, npc)
+	else
+		process_disassembly_item_results_post_animation(results, section, npc)
+	end
+end
+
+function disassembly_item(obj, obj_d) -- the only purpose of this function is to allow ammo_maker.script override to work, 
+									  -- can be removed if ammo_maker will be patched to override disassembly_item_object
+	disassembly_impl(false, {obj}, obj_d)
+end
+
+function disassembly_wrapper(isBatch, objs, tool)
+	if (tool == nil) then
+		if IsWeapon(objs[1]) then			
+			actor_menu.set_item_news('fail', 'weapon', "st_dis_text_3", " ")
+		else
+			news_manager.send_tip(db.actor, game.translate_string("st_news_dis_items"), nil, "swiss_knife", 6000)
+		end
+		return
+	end
+	
+	-- Warning message on safe keybind
+	local chk = ui_options.get("control/general/disassembly_warning")
+	if chk and (not d_flag) then
+		actor_menu.set_item_news("success", "detail", "st_awr_ctrl")
+		return
+	end
+
+	if #objs == 1 and not isBatch and not IsWeapon(objs[1]) and not IsHeadgear(objs[1]) and not IsWeapon(objs[1]) then
+		disassembly_item(objs[1], tool)
+		return
+	end
+
+	disassembly_impl(isBatch, objs, tool)
+end
+
+function exec_disassembly_impl(isBatch, objs, tool)
+	async_utils.run_async_timer_function(disassembly_wrapper, {}, isBatch, objs, tool)
+end
+
+function get_suitable_dtool(obj)
+	local itms_disassemble = {}
+	if IsWeapon(obj) then
+		itms_disassemble["leatherman_tool"] = {}
+	else
+		itms_disassemble = GetItemList("disassemble")
+	end
+	for sec,v in pairs(itms_disassemble) do
+		local res
+		db.actor:iterate_ruck(function(temp, item)
+			if item:section() == sec and alife_object(item:id()) ~= nil then
+				res = item
+				return true
+			end
+		end)
+		if res ~= nil then
+			return res
+		end
+	end
+end
+
+function is_suitable_dtool(obj, obj_d)
+	if not (obj and obj_d) then
+		return false
+	end
+	
+	if IsWeapon(obj) then
+		return (obj_d:section() == "leatherman_tool")
+	else
+		local itms_disassemble = GetItemList("disassemble")
+		return itms_disassemble[obj_d:section()]
+	end
+end
+
+function create_disassemble_list(t, group_items)
+	local str = ""
+	if group_items == true then
+		order_table = {}
+		count_table = {}
+		for i=1,#t do
+			if count_table[t[i]] == nil then
+				count_table[t[i]] = 1
+				table.insert(order_table, t[i])
+			else
+				count_table[t[i]] = count_table[t[i]] + 1
+			end
+		end		
+		for i=1,#order_table do
+			local item_name = ui_item.get_sec_name(order_table[i])
+			local item_count = count_table[order_table[i]]
+			str = str .. "\\n- " .. item_count .. " " .. item_name
+		end
+	else
+		for i=1,#t do
+			str = str .. "\\n- " .. ui_item.get_sec_name(t[i])
+		end
+	end
+	return str
+end
+
+
+----------------------------------------------------------------------
+-- Parts state
+----------------------------------------------------------------------
+function evaluate_parts(obj)
+	--[[
+	if not (IsWeapon(obj) or IsOutfit(obj) or IsHeadgear(obj)) then
+		return nil
+	end
+	--]]
+
+	local sec = obj:section()
+	sec = ini_sys:r_string_ex(sec,"parent_section") or sec -- for weapons with scopes
+	local id = obj:id()
+	local m_con = math_ceil(obj:condition() * 100) -- default condition of the item
+	
+	local parts = ini_parts:r_string_ex("con_parts_list",sec)
+	if parts then
+		parts = str_explode(parts,",")
+		
+		local data = se_load_var(id, obj:name(), "parts")
+
+		-- Savegame compatibility. Recalculate with changed parts
+		if data and data[sec] then
+			for i=1,#parts do
+				if (not data[parts[i]]) then
+					empty_table(data)
+					break
+				end
+			end
+		end
+		
+		-- Re-evaluate saved parts conditions
+		if data and data[sec] then
+
+			-- negative differance = increase con
+			local d_con = m_con - data[sec] --data[sec] - m_con
+			
+			if (math_abs(d_con) < diff_con) then
+				return data -- don't evaluate if con differance is very small
+			end
+			
+			local sign = d_con < 0 and true or false
+			local c = #parts
+			local pd_con = math_abs(d_con) * c
+			
+			-- Collect saved parts condition
+			empty_table(prt_val)
+			for i=1,c do
+				prt_val[i] = data[parts[i]] or 0
+				if (sign and prt_val[i] <= min_con) or ((not sign) and prt_val[i] >= max_con) then
+					prt_val[i] = nil
+				end
+			end
+			
+			-- Condition decreament/increasement based on condition difference since last evaluation
+			for i=1,pd_con do
+				local pick = random_key_table(prt_val)
+				if (not pick) then
+					break
+				end
+				
+				prt_val[pick] = prt_val[pick] + 1*(sign and -1 or 1)
+				if (sign and prt_val[pick] <= min_con) or ((not sign) and prt_val[pick] >= max_con) then
+					prt_val[pick] = nil
+				end
+			end
+			
+			data[sec] = m_con
+			for i=1,c do
+				data[parts[i]] = prt_val[i] or (sign and min_con) or ((not sign) and max_con)
+				--printf("/ Re-evaluate part condition: MDATA(%s)[%s] - part[%s] = %s", id, sec, parts[i], data[parts[i]])
+			end
+			se_save_var( id, obj:name(), "parts", data )
+			
+		-- Evaluate non-existing parts condition for the first time
+		else
+			data = {}
+			data[sec] = m_con
+			
+			empty_table(prt_sign)      -- temp table for parts
+			empty_table(prt_st)          -- stacker
+			local c = #parts         -- num of parts
+			local diff = 100 - m_con -- decreasement in item condition
+			
+			-- Decide which parts have better condition than others
+			local num_of_prt_signs = math.random(c) -- how many parts with better condition
+			local unique_indx -- index of unique part to give it low condition, like helmets
+			for i=1,c do
+				prt_sign[i] = 1
+				if string_find(parts[i],"helm_") then
+					unique_indx = i
+				end
+			end
+			while (size_table(prt_st) < num_of_prt_signs) do
+				local pick = math.random(c)
+				if (not prt_st[pick]) then
+					prt_st[pick] = true
+					prt_sign[pick] = -1
+					--printf("-prt_sign[%s] = -1", pick)
+				end
+			end
+			
+			-- If a unique part is found: give it low condition + switch another part to a high conditino 
+			if unique_indx and (prt_sign[unique_indx] == 1) then
+				prt_sign[unique_indx] = -1
+				for i=1,c do
+					if (i ~= unique_indx) and (prt_sign[i] == -1) then
+						prt_sign[i] = 1
+						break
+					end
+				end
+			end
+			
+			-- Decide condition for each part
+			empty_table(prt_val)
+			local delta_m = math_ceil(diff/num_of_prt_signs) -- 33
+			local delta_p = math_ceil(diff/(c - num_of_prt_signs)) -- 16
+			for i=1,c do
+				if prt_sign[i] == 1 then
+					local delta = math.random(math_floor(delta_p/2),delta_p)
+					prt_val[i] = diff - delta
+					--printf("-delta_p[%s] = %s | diff = %s | prt_val[%s] = %s", i, delta, diff, i, prt_val[i])
+				else
+					local delta = math.random(math_floor(delta_m/2),delta_m)
+					prt_val[i] = diff + delta
+					--printf("-delta_m[%s] = %s | diff = %s | prt_val[%s] = %s", i, delta, diff, i, prt_val[i])
+				end
+			end
+			
+			for i=1,c do
+				data[parts[i]] = clamp(math_ceil(100 - prt_val[i]), min_con, max_con) -- condition of a part, %100 scale
+				--printf("/ Evaluate part condition: MDATA(%s)[%s] - part[%s] = %s", id, sec, parts[i], data[parts[i]])
+			end
+			
+			se_save_var( id, obj:name(), "parts", data )
+			
+			--	local all = 0
+			--	for i=1,c do
+			--		all = all + data[parts[i]]
+			--	end
+			--	
+			--	printf("= Average cond = %s", all/c)
+		end
+	end
+end
+
+function set_parts_con(id, data)
+	se_save_var( id, nil, "parts", data )
+end
+
+function get_parts_con(obj, id, evaluate)
+	if obj and evaluate then
+		evaluate_parts(obj)
+	end
+	id = obj and obj:id() or id
+	return id and se_load_var(id, nil, "parts")
+end
+
+function clear_parts_con(id)
+	se_save_var( id, nil, "parts", nil )
+end
+
+function copy_parts_con(id_from, id_to)
+	local data_from = se_load_var(id_from, nil, "parts")
+	if data_from then
+		se_save_var( id_to, nil, "parts", dup_table(data_from) )
+	end
+end
+
+function get_suitable_part_con(sec, con) -- used for random part condition for normal items disassembly
+	local part_con = (math.random(100) < 50) and 50 or 75
+	if con and (con < 0.9) then
+		part_con = utils_item.get_cond_static(con*100)
+	end
+	return (part_con/100)
+end
+
+
+----------------------------------------------------------------------
+-- Callbacks
+----------------------------------------------------------------------
+function actor_on_item_take(obj)
+	evaluate_parts(obj)
+end
+
+function on_item_drag_dropped(obj_1, obj_2, slot_from, slot_to)
+	-- Check capability
+	if not (slot_from == EDDListType.iActorBag and slot_to == EDDListType.iActorBag) then
+        return
+    end
+	
+	local sec_1 = obj_1:section()
+	local sec_2 = obj_2:section()
+	
+	if IsItem("disassemble",sec_1) and menu_disassembly(obj_2) then -- Disassemble
+		if (not is_suitable_dtool(obj_2, obj_1)) then
+			obj_1 = nil
+		end
+		exec_disassembly_impl(false, {obj_2}, obj_1)
+	end
+end
+
+function on_key_press(key)
+	if (key == DIK_keys[d_key]) then
+		d_flag = true
+	end
+end
+
+function on_key_release(key)
+	if (key == DIK_keys[d_key]) then
+		d_flag = false
+	end
+end
+
+
+NameCustom = ui_inventory.UIInventory.Name_Custom
+function ui_inventory.UIInventory:Name_Custom(obj, bag, temp, i)
+	obj = self:CheckItem(obj,"Name_Custom " .. i)
+	if i == batch_disassembly_property_index then
+		return menu_batch_disassembly(obj)
+	else
+		return NameCustom(self, obj, bag, temp, i)
+	end
+end
+
+ActionCustom = ui_inventory.UIInventory.Action_Custom
+function ui_inventory.UIInventory:Action_Custom(obj, bag, temp, i)
+	obj = self:CheckItem(obj,"Action_Custom " .. i)
+	if i == batch_disassembly_property_index then
+		func_batch_disassembly(obj)
+		self:On_Item_Update()
+	else
+		return ActionCustom(self, obj, bag, temp, i)
+	end
+end
+
+ModeCustom = ui_inventory.UIInventory.Mode_Custom
+function ui_inventory.UIInventory:Mode_Custom(obj, bag, temp, i)
+	obj = self:CheckItem(obj,"Mode_Custom " .. i)
+	printf("checking for mode %s, supported : %s", self.mode, batch_disassembly_supported_modes)
+	if i == batch_disassembly_property_index then
+		return batch_disassembly_supported_modes:match('%f[%a]'..self.mode..'%f[%A]') ~= nil
+	else
+		return ModeCustom(self, obj, bag, temp, i)
+	end
+end
+
+ContCustom = ui_inventory.UIInventory.Cont_Custom
+function ui_inventory.UIInventory:Cont_Custom(obj, bag, temp, i)
+	obj = self:CheckItem(obj,"Cont_Custom " .. i)
+	printf("checking for bag %s, supported : %s", bag, batch_disassembly_supported_containers)
+	if i == batch_disassembly_property_index then
+		printf("returning suported containers")
+		return batch_disassembly_supported_containers:match('%f[%a]'..bag..'%f[%A]') ~= nil
+	else
+		return ContCustom(self, obj, bag, temp, i)
+	end
+end
+
+function on_game_start()
+	init_settings()
+	
+	RegisterScriptCallback("on_key_press",on_key_press)
+	RegisterScriptCallback("on_key_release",on_key_release)
+	RegisterScriptCallback("ActorMenu_on_item_drag_drop",on_item_drag_dropped)
+	RegisterScriptCallback("actor_on_item_take",actor_on_item_take)
+end
+
+
+----------------------------------------------------------------------
+-- Debug
+----------------------------------------------------------------------
+function print_con_tbl(tbl,str)
+	for k,v in pairs(tbl) do
+		printf("/ item_parts | %s | id: %s - con: %s", str, k, v)
+	end
+end
+
+function print_parts_tbl()
+	local se_data = alife_storage_manager.get_state().se_object
+	for id,v in pairs(se_data) do
+		if (type(v) == "table") and v["parts"] then
+			printf("/ parts table for (%s)", id)
+			for k1,v1 in pairs(v["parts"]) do
+				printf("/ [%s] - condition: %s", k1, v1)
+			end
+		end
+	end
+end

@@ -1,0 +1,51 @@
+
+
+if (ammo_maker and item_parts.batch_disassembly_supported) then
+    NameCustom = ui_inventory.UIInventory.Name_Custom
+    ui_inventory.UIInventory.Name_Custom  = function(self, obj, bag, temp, i)
+        obj = self:CheckItem(obj,"Name_Custom " .. i)
+        if i == item_parts.batch_disassembly_property_index and IsAmmo(obj) then
+            if item_parts.is_more_than_one_batch_of_type(obj) or item_parts.batch_disassembly_always_shown then
+                return NameCustom(self, obj, bag, temp, 4) -- using ammo_maker
+            else
+                return false
+            end
+        elseif i == 4 and IsAmmo(obj) then
+            return ammo_maker.NameCustom(self, obj, bag, temp, 4)  -- skipping ammo_maker
+        else
+            return NameCustom(self, obj, bag, temp, i)
+        end
+    end
+
+    ActionCustom = ui_inventory.UIInventory.Action_Custom
+    ui_inventory.UIInventory.Action_Custom = function(self,obj, bag, temp, i)
+        obj = self:CheckItem(obj,"Action_Custom " .. i)
+        if i == item_parts.batch_disassembly_property_index and IsAmmo(obj) then
+            ActionCustom(self, obj, bag, temp, 4) -- using ammo_maker
+        elseif i == 4 and IsAmmo(obj) then
+            ammo_maker.ActionCustom(self, obj, bag, temp, 4) --skipping ammo_maker
+        else
+            ActionCustom(self, obj, bag, temp, i)
+        end
+    end
+
+    ModeCustom = ui_inventory.UIInventory.Mode_Custom
+    ui_inventory.UIInventory.Mode_Custom = function(self,obj, bag, temp, i)
+        obj = self:CheckItem(obj,"Mode_Custom " .. i)
+        if i == item_parts.batch_disassembly_property_index and IsAmmo(obj) then
+            return ("inventory, loot"):match('%f[%a]'..self.mode..'%f[%A]') ~= nil
+        else
+            return ModeCustom(self, obj, bag, temp, i)
+        end
+    end
+
+    ContCustom = ui_inventory.UIInventory.Cont_Custom
+    ui_inventory.UIInventory.Cont_Custom = function(self,obj, bag, temp, i)
+        obj = self:CheckItem(obj,"Cont_Custom " .. i)
+        if i == item_parts.batch_disassembly_property_index and IsAmmo(obj) then
+            return ("actor_bag"):match('%f[%a]'..bag..'%f[%A]') ~= nil
+        else
+            return ContCustom(self, obj, bag, temp, i)
+        end
+    end
+end

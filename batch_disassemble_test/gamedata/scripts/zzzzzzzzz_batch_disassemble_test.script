@@ -1,0 +1,3171 @@
+local tests_succeed = 0
+--local tests_failed = 0
+local failed_tests = {}
+local tests_executed = 0
+local gamma = ammo_maker ~= nil
+local new_outfit_parts_condition = 0.999
+local new_weapon_parts_condition = 0.999
+if gamma or item_parts.batch_disassembly_supported then
+    new_outfit_parts_condition = 0.99
+end
+if gamma then
+    new_weapon_parts_condition = 0.99
+end
+local disassembly_property_index = 6
+local batch_disassembly_property_index = 10
+local ammo_batch_disassembly_property_index = 10
+if gamma and not item_parts.batch_disassembly_supported then
+    ammo_batch_disassembly_property_index = 4
+end
+
+local dead_stalker
+
+SendTip = news_manager.send_tip
+tips = {}
+function send_tip(actor, news_id, timeout, sender, showtime, sender_id)
+    printf("news were posted with message %s and icon %s", news_id, sender)
+    local skipped_tips = {
+        "Welcome to S.T.A.L.K.E.R. G.A.M.M.A."
+    }
+    for i = 1,#skipped_tips do
+        if news_id:sub(1, #skipped_tips[i]) == skipped_tips[i] then
+            printf("skipping tip %s", skipped_tips[i])
+            return
+        end
+    end 
+    table.insert( tips, {msg = news_id, icon = sender} )
+    SendTip(actor, news_id, timeout, sender, showtime, sender_id)
+end
+
+TranslateString = game.translate_string
+function translate_string(text)
+    --printf("intercepting request to translte text")
+    --printf("source : %s", text)
+    --printf("original translated: %s", TranslateString(text))
+    local _, count = string.gsub(TranslateString(text), "%%s", "")
+    --printf("number of substitutions : %s", count)
+    res = text .. string.rep(" %s", count)
+    --printf("returning res %s", res)
+    return res
+end
+
+
+GetSecName = ui_item.get_sec_name
+function get_sec_name(sec)
+    return sec
+end
+
+PlayItemFx = actor_effects.play_item_fx
+fxs = {}
+function play_item_fx(fx)
+    table.insert(fxs, fx)
+    PlayItemFx(fx)
+end
+
+IncrementStatistic = game_statistics.increment_statistic
+statistics = {}
+function increment_statistic(statistic)
+    local skipped_stats = {
+        "articles"
+    }
+    for i = 1,#skipped_stats do
+        if statistic == skipped_stats[i] then
+            printf("skipping statistic %s", skipped_stats[i])
+            return
+        end
+    end 
+
+    table.insert(statistics, statistic)
+    IncrementStatistic(statistic)
+end
+
+local function check_tips(expected_tips)
+    local err
+    if #tips ~= #expected_tips then
+        err = "unexpected number of tips : " .. #tips .. " (expected " .. #expected_tips .. ")"
+    else
+        for i = 1,#expected_tips do
+            if tips[i].msg ~= expected_tips[i].msg then
+                err = "unexpected message in tip #" .. i .. " :\n" .. tips[i].msg .. " \nexpected :\n" .. expected_tips[i].msg
+                break
+            end
+            if tips[i].icon ~= expected_tips[i].icon then
+                err = "unexpected icon in tip #" .. i .. " " .. tips[i].icon .. " (expected " .. expected_tips[i].icon .. ")"
+                break
+            end
+        end
+    end
+    if err ~= nil then
+        printf("check_tips failed : %s", err)
+        error(err)
+    end
+end
+
+local function check_fxs(expected_fxs)
+    local err
+    if #fxs ~= #expected_fxs then
+        err = "unexpected number of fxs : " .. #fxs .. " (expected " .. #expected_fxs .. ")"
+    else
+        for i = 1,#expected_fxs do
+            if fxs[i] ~= expected_fxs[i] then
+                err = "unexpected fx #" .. i .. " " .. fxs[i] .. " (expected " .. expected_fxs[i] .. ")"
+                break
+            end
+        end
+    end
+    if err ~= nil then
+        printf("check_fxs failed : %s", err)
+        printf("fxs: ")
+        for i = 1,#fxs do
+            printf("  %s", fxs[i])
+        end
+        error(err)
+    end
+end
+
+local function check_statistics(expected_statistics)
+    local err
+    if #statistics ~= #expected_statistics then
+        err = "unexpected number of statistics : " .. #statistics .. " (expected " .. #expected_statistics .. ")"
+    else
+        for i = 1,#expected_statistics do
+            if statistics[i] ~= expected_statistics[i] then
+                err = "unexpected statistic #" .. i .. " " .. statistics[i] .. " (expected " .. expected_statistics[i] .. ")"
+                break
+            end
+        end
+    end
+    if err ~= nil then
+        printf("check_statistics failed : %s", err)
+        printf("statistics: ")
+        for i = 1,#statistics do
+            printf("  %s", statistics[i])
+        end
+        error(err)
+    end
+end
+
+function enable_animations()
+    ui_options.set("video/player/animations", true)
+    actor_effects.init_main_settings()
+end
+function disable_animations()
+    ui_options.set("video/player/animations", false)
+    actor_effects.init_main_settings()
+end
+
+function enable_disassembly_warning()
+    ui_options.set("control/general/disassembly_warning", true)
+    actor_effects.init_main_settings()
+end
+
+function disable_disassembly_warning()
+    ui_options.set("control/general/disassembly_warning", false)
+    actor_effects.init_main_settings()
+end
+
+function close_inventory()
+    ui_inventory.hide_inventory()
+end
+
+function open_inventory()
+    close_inventory()
+    actor_menu_inventory.CUIActorMenu_OnMode_Inventory()
+end
+
+function prepare_dead_stalker()
+    if not dead_stalker then
+        local res = alife_create_item("stalker", {db.actor:position(), 
+        db.actor:level_vertex_id(), db.actor:game_vertex_id()})
+
+        coroutine.yield(0.5)
+        dead_stalker = level.object_by_id(res.id)
+        dead_stalker:kill(dead_stalker)
+        death_manager.create_release_item(dead_stalker)
+        coroutine.yield(0.5)
+    end
+    dead_stalker:iterate_ruck(function(temp, item)
+        printf("deleting item %s %s", item, item:name())
+        printf("section: %s", item:section())
+        dead_stalker:drop_item(item)
+       	alife_release(item)
+	end)
+end
+
+function loot_dead_stalker()
+    close_inventory()
+    SendScriptCallback("npc_on_use",dead_stalker,db.actor)
+end
+
+local function prepare()
+    db.actor:iterate_ruck(function(temp, item)
+        printf("deleting item %s %s", item, item:name())
+        printf("section: %s", item:section())
+        db.actor:drop_item(item)
+       	alife_release(item)
+	end)
+    tips = {}
+    fxs = {}
+    statistics = {}
+    
+    if db.actor:item_in_slot(2) == nil then -- to force tests put weapon into ruck instead of slot
+        create_item("wpn_desert_eagle") 
+    end
+
+    if db.actor:item_in_slot(3) == nil then -- to force tests put weapon into ruck instead of slot
+        create_item("wpn_sig550_camo") 
+    end
+
+    SendScriptCallback("on_key_release", DIK_keys["DIK_LMENU"])
+    disable_disassembly_warning()
+    disable_animations()
+    item_parts.batch_disassembly_property_index = 10
+end
+
+local function dump_ruck_content(owner)
+    if onwer == nil then
+        owner = db.actor
+    end
+    owner:iterate_ruck(function(temp, item)
+        printf("  item %s", item:name())
+        if utils_item.is_degradable(item) then
+            printf("    condition is %s", item:condition())
+        end
+        if IsItem("multiuse",nil,item) then
+            printf("    remaining uses %s", item:get_remaining_uses())
+        end
+        if IsAmmo(item) then
+            printf("    remaining ammo %s", item:ammo_get_count())
+        end
+        if IsWeapon(item) or IsOutfit(item) or IsHeadgear(item) then
+            local parts = item_parts.get_parts_con(item, nil, true)
+            if parts ~= nil then
+                for k,v in pairs(parts) do
+                    printf("    cond of part %s is %s", k, v)
+                end
+            else
+                printf("    no parts (for some reason??)")
+            end
+        end
+    end)
+end
+
+local function check_value(actual, expected, msg)
+    if actual ~= expected then
+        local err = "unexpected value: " .. tostring(actual) .. " (expected :" .. tostring(expected) .. ")"
+        if msg then
+            err = msg .. ": " .. err
+        end
+        printf(err)
+        error(err)
+    end
+end
+
+local function check_ruck(expected, owner)
+    local err
+    if owner == nil then
+        owner = db.actor
+    end
+    owner:iterate_ruck(function(temp, item)
+        local item_expected = false
+        --printf("is item %s expected?", item:name())
+        for i, v in ipairs(expected) do
+            if v.sec == item:section() then
+                local cond = true
+                if v.cond and type(v.cond) == "number" then
+                    --printf("item condition is %s, expected condition is %s", item:condition(), v.cond)
+                    cond = item:condition() > (v.cond - 0.0001) and item:condition() < (v.cond + 0.0001)
+                    --printf("cond is %s", cond)
+                elseif v.cond and type(v.cond) == "table" then
+                    cond = false
+                    for i = 1, #v.cond do
+                        if item:condition() > (v.cond[i] - 0.0001) and item:condition() < (v.cond[i] + 0.0001) then
+                            cond = true
+                            break
+                        end
+                    end
+                end
+                local uses = true
+                if v.uses then
+                    uses = item:get_remaining_uses() == v.uses
+                end
+                local ammo = true
+                if v.ammo then
+                    ammo = item:ammo_get_count() == v.ammo
+                end
+                if cond and uses and ammo then
+                    item_expected = true
+                    table.remove(expected, i)
+                    break
+                end
+            end
+        end
+        if item_expected == false then
+            err = "item " .. item:name() .. " is not expected"
+            return true
+        end
+	end)
+    
+    if #expected ~= 0 and err == nil then
+        err = "expected item of type " .. expected[1].sec
+        if expected[1].cond and type(expected[1].cond) == "number" then
+            err = err .. " and condition " .. expected[1].cond
+        elseif expected[1].cond and type(expected[1].cond) == "table" then
+            err = err .. " and possible conditions "
+            for i = 1, #expected[1].cond do
+                err = err .. expected[1].cond[i] .. ","
+            end
+        end
+        err = err .. " is not found"
+    end
+    if err ~= nil then
+        printf(err)
+        printf("ruck content: ")
+        dump_ruck_content(owner)
+        printf("yet not found expected items: ")
+        for i, v in ipairs(expected) do
+            local str = "  item " .. v.sec
+            if v.cond and type(v.cond) == "number" then
+                str = str .. " of condition " .. v.cond
+            elseif v.cond and type(v.cond) == "table" then
+                str = str .. " of possible conditions "
+                for i = 1, #v.cond do
+                    str = str .. v.cond[i] .. ","
+                end
+            end
+            if v.uses then
+                str = str .. " with " .. v.uses .. " uses"
+            end
+            if v.ammo then
+                str = str .. " with " .. v.ammo .. " ammo"
+            end
+            printf(str)
+        end
+
+        error(err)
+    end
+end
+
+function run_timer_async_function(func, settings, ...)
+    local coro = coroutine.create(func)
+    local i = 0
+    if not settings then settings = {} end
+    local step_func
+    step_func = function(...)
+        local status, res
+        if i == 0 then
+            status, res = coroutine.resume(coro, ...)
+        else
+            status, res = coroutine.resume(coro)
+        end
+
+        if status == false then
+            printe("run_timer_async_function: function failure: %s", res)
+        end
+
+        if coroutine.status(coro) == "suspended" then
+            local delay = settings.default_delay
+            local ev_id
+            local act_id
+            if settings.default_ev_id then
+                ev_id = settings.default_ev_id .. i
+            end
+            if settings.default_act_id then
+                act_id = settings.default_act_id .. i
+            end
+            if type(res) == "number" then
+                delay = res
+            elseif type(res) == "table" then
+                if res.delay then delay = res.delay end
+                if res.ev_id then ev_id = res.ev_id end
+                if res.act_id then act_id = res.act_id end
+            end
+            if not delay then printe("run_timer_async_function: delay not specified") end
+            if not ev_id then printe("run_timer_async_function: ev_id not specified") end
+            if not act_id then printe("run_timer_async_function: act_id not specified") end
+            i = i + 1
+            CreateTimeEvent(ev_id, act_id, delay, step_func)
+        end
+        return true
+    end
+    step_func(...)
+end
+
+function run_test(t, name)
+    printf("================================================")
+    printf("executing test %s", name)
+
+    prepare()
+    coroutine.yield()
+
+    local success, return_value = pcall(t)
+    coroutine.yield()
+
+    if success == false then
+        printf("test %s erred with error %s", name, return_value)
+        SendTip(db.actor, "%c[d_red]test " .. name .. " failed : " .. return_value, nil, nil, 15000)
+        table.insert(failed_tests, name )
+    else
+        printf("test %s succeed", name)
+        tests_succeed = tests_succeed + 1
+    end
+    tests_executed = tests_executed + 1
+
+    printf("done executing test %s", name)
+end
+
+function execute_tests(tests)
+    game.translate_string = translate_string
+    ui_item.get_sec_name = get_sec_name
+    news_manager.send_tip = send_tip
+    actor_effects.play_item_fx = play_item_fx
+    game_statistics.increment_statistic = increment_statistic
+    tests_executed = 0
+    tests_succeed = 0
+    failed_tests = {}
+
+    printf("executing tests, count : %s", #tests)
+    for i = 1,#tests do
+        local t = tests[i][1]
+        local name = tests[i][2]
+
+        run_test(t, name)
+    end
+    printf("tests_executed: %s, tests_succeed: %s, tests_failed: %s", tests_executed, tests_succeed, #failed_tests)
+    if tests_executed == tests_succeed then
+        SendTip(db.actor, "%c[d_green]all " .. tests_executed .. " tests succeeded", nil, nil, 15000)
+    else
+        local msg = "%c[d_red] " .. #failed_tests .. " of " .. tests_executed .. " tests failed, failed tests:"
+        for i = 1,#failed_tests do
+            printf("  %s", failed_tests[i])
+            msg = msg .. "\\n" .. failed_tests[i]
+        end
+        SendTip(db.actor, msg, nil, nil, 15000)
+    end
+
+    game.translate_string = TranslateString
+    ui_item.get_sec_name = GetSecName
+    news_manager.send_tip = SendTip
+    actor_effects.play_item_fx = PlayItemFx
+    game_statistics.increment_statistic = IncrementStatistic
+end
+
+function create_item(name, condition, owner)
+    if owner == nil then
+        owner = db.actor
+    end
+    local item = alife_create_item(name, owner)
+    
+    coroutine.yield()
+
+    item = level.object_by_id(item.id)
+    if condition ~= nil then
+        item:set_condition(condition)
+    end
+    printf("item %s was created", item:name())
+    return item
+end
+
+local function item_by_leatherman()
+    create_item("leatherman_tool")
+    local bnd = create_item("bandage")
+
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function item_by_leatherman_delay()
+    enable_animations()
+    
+    create_item("leatherman_tool")
+    local bnd = create_item("bandage")
+
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    check_ruck(expected)
+    check_tips({})
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    coroutine.yield(4)
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function item_by_leatherman_protection()
+    enable_disassembly_warning()
+
+    create_item("leatherman_tool")
+    local bnd = create_item("bandage")
+
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "bandage"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+    
+    SendScriptCallback("on_key_press", DIK_keys["DIK_LMENU"])
+
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    bnd = create_item("bandage")
+
+    SendScriptCallback("on_key_release", DIK_keys["DIK_LMENU"])
+
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    table.insert(expected, {sec = "bandage"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function item_by_grooming()
+    create_item("grooming")
+    local bnd = create_item("bandage")
+
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "grooming", cond = 0.91})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function item_by_swiss()
+    create_item("swiss_knife")
+    local bnd = create_item("bandage")
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "swiss_knife", cond = 0.91})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function item_no_tool()
+
+    local bnd = create_item("bandage")
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "bandage"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_news_dis_items", icon = "swiss_knife"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function item_tool_selection()
+    create_item("swiss_knife")
+    create_item("leatherman_tool")
+    create_item("grooming")
+    local bnd = create_item("bandage")
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    if gamma then
+        table.insert(expected, {sec = "swiss_knife", cond = 1})
+        table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    else
+        table.insert(expected, {sec = "swiss_knife", cond = 0.91})
+        table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    end
+    table.insert(expected, {sec = "grooming", cond = 1})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function batch_several_tools_selection()
+     if not item_parts.batch_disassembly_supported then
+        return
+     end
+
+    create_item("swiss_knife")
+    create_item("grooming")
+    create_item("leatherman_tool", 0.01)
+    create_item("leatherman_tool", 1)
+    create_item("swiss_knife")
+    create_item("grooming")
+    local bnd = create_item("bandage")
+    create_item("bandage")
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    if gamma then
+        table.insert(expected, {sec = "swiss_knife", cond = 1})
+        table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    else
+        table.insert(expected, {sec = "swiss_knife", cond = 0.82})
+        table.insert(expected, {sec = "leatherman_tool", cond = 0.01})
+        table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    end
+    table.insert(expected, {sec = "swiss_knife", cond = 1})
+    table.insert(expected, {sec = "grooming", cond = 1})
+    table.insert(expected, {sec = "grooming", cond = 1})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- 2 prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+local function batch_not_enough_tools()
+    if not item_parts.batch_disassembly_supported then
+       return
+    end
+
+    create_item("leatherman_tool", 0.01)
+    local bnd = create_item("bandage")
+    create_item("bandage")
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "bandage"})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function multiuse_item_device_by_leatherman()
+    create_item("leatherman_tool")
+
+    local cooking = create_item("cooking")
+    cooking:set_remaining_uses(2)
+
+    ui_inventory.GUI:Action_Custom(cooking, "actor_bag", nil, 6)
+
+    coroutine.yield()
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_i_plastic"})
+    table.insert(expected, {sec = "cooking", uses = 1})
+    if not gamma then
+        table.insert(expected, {sec = "cutlery"})
+        table.insert(expected, {sec = "prt_i_plastic"})
+    end
+    check_ruck(expected)
+    local msg = gamma and "st_dis_text_11 %c[255,51,255,102] cooking %c[255,250,250,250] st_dis_text_9 \\n- prt_i_plastic"
+                      or "st_dis_text_11 %c[255,51,255,102] cooking %c[255,250,250,250] st_dis_text_9 \\n- cutlery\\n- prt_i_plastic\\n- prt_i_plastic"
+    check_tips({
+        {msg = msg, icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function charged_device_by_leatherman()
+    create_item("leatherman_tool")
+    local device = create_item("device_pda_1", 0.6)
+
+    ui_inventory.GUI:Action_Custom(device, "actor_bag", nil, 6)
+
+    coroutine.yield()
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_copper"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    table.insert(expected, {sec = "batteries_dead", cond = 0.6})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] device_pda_1 %c[255,250,250,250] st_dis_text_9 \\n- prt_i_capacitors\\n- prt_i_capacitors\\n- prt_i_transistors\\n- prt_i_transistors\\n- prt_i_resistors\\n- prt_i_resistors\\n- prt_i_copper\\n- prt_i_fasteners" .. (item_parts.batch_disassembly_supported and "\\n- batteries_dead" or ""), icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+
+local function charged_device_by_leatherman_delay()
+    enable_animations()
+ 
+    create_item("leatherman_tool")
+    local device = create_item("device_pda_1", 0.6)
+
+    ui_inventory.GUI:Action_Custom(device, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    check_ruck(expected)
+    check_tips({})
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    coroutine.yield(4)
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_copper"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    table.insert(expected, {sec = "batteries_dead", cond = 0.6})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] device_pda_1 %c[255,250,250,250] st_dis_text_9 \\n- prt_i_capacitors\\n- prt_i_capacitors\\n- prt_i_transistors\\n- prt_i_transistors\\n- prt_i_resistors\\n- prt_i_resistors\\n- prt_i_copper\\n- prt_i_fasteners" .. (item_parts.batch_disassembly_supported and "\\n- batteries_dead" or ""), icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function dead_device_by_leatherman()
+    create_item("leatherman_tool")
+    local device = create_item("device_pda_1", 0.04)
+
+    ui_inventory.GUI:Action_Custom(device, "actor_bag", nil, 6)
+
+    coroutine.yield()
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_copper"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] device_pda_1 %c[255,250,250,250] st_dis_text_9 \\n- prt_i_capacitors\\n- prt_i_capacitors\\n- prt_i_transistors\\n- prt_i_transistors\\n- prt_i_resistors\\n- prt_i_resistors\\n- prt_i_copper\\n- prt_i_fasteners", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function degradable_item()
+    create_item("leatherman_tool")
+    local bnd = create_item("af_plates", 0.8)
+
+    ui_inventory.GUI:Action_Custom(bnd, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_ballistic_13", cond = {gamma and 0.8 or 1}})
+    table.insert(expected, {sec = "prt_o_ballistic_9", cond = {gamma and 0.8 or 1}})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    check_ruck(expected)
+    
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] af_plates %c[255,250,250,250] st_dis_text_9 \\n- prt_o_ballistic_13\\n- prt_o_ballistic_9\\n- prt_i_scrap\\n- prt_i_fasteners", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"artefacts_found", "items_disassembled"})
+end
+
+local function item_on_dead_stalker()
+    
+    prepare_dead_stalker()
+
+    create_item("leatherman_tool")
+    local actor_item = create_item("bandage")
+    create_item("bandage")
+    local npc_item = create_item("bandage", nil, dead_stalker)
+    create_item("bandage", nil, dead_stalker)
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 1},
+        {sec = "bandage"},
+        {sec = "bandage"},
+    })
+
+    check_ruck({
+        {sec = "bandage"},
+        {sec = "bandage"},
+    }, dead_stalker)
+
+    check_tips({})
+    check_fxs({})
+    check_statistics({})
+
+    loot_dead_stalker()
+    coroutine.yield()
+
+    ui_inventory.GUI:Action_Custom(actor_item, "actor_bag", nil, 6)
+    coroutine.yield()
+    
+    check_ruck({
+        {sec = "leatherman_tool", cond = 39/40},
+        {sec = "bandage"},
+        {sec = "prt_o_fabrics_3"},
+    })
+
+    check_ruck({
+        {sec = "bandage"},
+        {sec = "bandage"},
+    }, dead_stalker)
+
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+    
+    ui_inventory.GUI:Action_Custom(npc_item, "npc_bag", nil, 6)
+    coroutine.yield()
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 38/40},
+        {sec = "bandage"},
+        {sec = "prt_o_fabrics_3"},
+    })
+
+    check_ruck({
+        {sec = "bandage"},
+        {sec = "prt_o_fabrics_3"},
+    }, dead_stalker)
+
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+    })
+    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+
+local function item_inventory_menu_entries()
+    create_item("leatherman_tool")
+    local item_multiple = create_item("bandage")
+    create_item("bandage")
+    create_item("bandage")
+    local item_single = create_item("device_pda_1")
+
+    open_inventory()
+
+    local batch_name_multiple = ui_inventory.GUI:Name_Custom(item_multiple, "actor_bag", nil, batch_disassembly_property_index)
+    local batch_name_single = ui_inventory.GUI:Name_Custom(item_single, "actor_bag", nil, batch_disassembly_property_index)
+    local name_multiple = ui_inventory.GUI:Name_Custom(item_multiple, "actor_bag", nil, disassembly_property_index)
+    local name_single = ui_inventory.GUI:Name_Custom(item_single, "actor_bag", nil, disassembly_property_index)
+    local batch_mode_multiple
+    local batch_mode_single
+    local mode_multiple
+    local mode_single
+    local batch_conts_multiple
+    local batch_conts_single
+    local conts_multiple
+    local conts_single
+
+    local enum_conts = function(obj, index)
+        local containers = {"actor_bag", "actor_equ", "actor_belt"}
+        local res = {}
+        for i,v in pairs(containers) do
+            res[v] = ui_inventory.GUI:Cont_Custom(obj, v, nil, index)
+        end
+        return res
+    end
+
+    if batch_name_multiple then
+        batch_mode_multiple = ui_inventory.GUI:Mode_Custom(item_multiple, "actor_bag", nil, batch_disassembly_property_index)
+        batch_conts_multiple = enum_conts(item_multiple, batch_disassembly_property_index)
+    end
+    if batch_name_single then
+        batch_mode_single = ui_inventory.GUI:Mode_Custom(item_single, "actor_bag", nil, batch_disassembly_property_index)
+        batch_conts_single = enum_conts(item_single, batch_disassembly_property_index)
+    end
+    if name_multiple then
+        mode_multiple = ui_inventory.GUI:Mode_Custom(item_multiple, "actor_bag", nil, disassembly_property_index)
+        conts_multiple = enum_conts(item_multiple, disassembly_property_index)
+    end
+    if name_single then
+        mode_single = ui_inventory.GUI:Mode_Custom(item_single, "actor_bag", nil, disassembly_property_index)
+        conts_single = enum_conts(item_single, disassembly_property_index)
+    end
+
+    if gamma and item_parts.batch_disassembly_supported then -- batch for multiple
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch item objects name")
+        check_value(batch_name_single, false, "single batch item objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple item objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single item objects name")
+        check_value(batch_mode_multiple, true, "multiple batch item objects mode")
+        check_value(mode_multiple, true, "multiple item objects mode")
+        check_value(mode_single, true, "single item objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], false, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], false, "batch_conts_multiple:actor_belt")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+    elseif gamma and not item_parts.batch_disassembly_supported then -- batch for everything
+        check_value(batch_name_multiple, false, "multiple batch item objects name")
+        check_value(batch_name_single, false, "single batch item objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple item objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single item objects name")
+        check_value(mode_multiple, true, "multiple item objects mode")
+        check_value(mode_single, true, "single item objects mode")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+    elseif not gamma and item_parts.batch_disassembly_supported then -- batch for multiple
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch item objects name")
+        check_value(batch_name_single, false, "single batch item objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple item objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single item objects name")
+        check_value(batch_mode_multiple, true, "multiple batch item objects mode")
+        check_value(mode_multiple, true, "multiple item objects mode")
+        check_value(mode_single, true, "single item objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], false, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], false, "batch_conts_multiple:actor_belt")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+    else -- not gamma and not item_parts.batch_disassembly_supported -- no batch
+        check_value(batch_name_multiple, false, "multiple batch item objects name")
+        check_value(batch_name_single, false, "single batch item objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple item objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single item objects name")
+        check_value(mode_multiple, true, "multiple item objects mode")
+        check_value(mode_single, true, "single item objects mode")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+    end
+end
+
+local function item_loot_menu_entries()
+    create_item("leatherman_tool")
+    local item_multiple = create_item("bandage")
+    create_item("bandage")
+    create_item("bandage")
+    local item_single = create_item("device_pda_1")
+
+    prepare_dead_stalker()
+    loot_dead_stalker()
+
+    local batch_name_multiple = ui_inventory.GUI:Name_Custom(item_multiple, "actor_bag", nil, batch_disassembly_property_index)
+    local batch_name_single = ui_inventory.GUI:Name_Custom(item_single, "actor_bag", nil, batch_disassembly_property_index)
+    local name_multiple = ui_inventory.GUI:Name_Custom(item_multiple, "actor_bag", nil, disassembly_property_index)
+    local name_single = ui_inventory.GUI:Name_Custom(item_single, "actor_bag", nil, disassembly_property_index)
+    local batch_mode_multiple
+    local batch_mode_single
+    local mode_multiple
+    local mode_single
+    local batch_conts_multiple
+    local batch_conts_single
+    local conts_multiple
+    local conts_single
+
+    local enum_conts = function(obj, index)
+        local containers = {"actor_bag", "actor_equ", "actor_belt", "npc_bag"}
+        local res = {}
+        for i,v in pairs(containers) do
+            res[v] = ui_inventory.GUI:Cont_Custom(obj, v, nil, index)
+        end
+        return res
+    end
+
+    if batch_name_multiple then
+        batch_mode_multiple = ui_inventory.GUI:Mode_Custom(item_multiple, "actor_bag", nil, batch_disassembly_property_index)
+        batch_conts_multiple = enum_conts(item_multiple, batch_disassembly_property_index)
+    end
+    if batch_name_single then
+        batch_mode_single = ui_inventory.GUI:Mode_Custom(item_single, "actor_bag", nil, batch_disassembly_property_index)
+        batch_conts_single = enum_conts(item_single, batch_disassembly_property_index)
+    end
+    if name_multiple then
+        mode_multiple = ui_inventory.GUI:Mode_Custom(item_multiple, "actor_bag", nil, disassembly_property_index)
+        conts_multiple = enum_conts(item_multiple, disassembly_property_index)
+    end
+    if name_single then
+        mode_single = ui_inventory.GUI:Mode_Custom(item_single, "actor_bag", nil, disassembly_property_index)
+        conts_single = enum_conts(item_single, disassembly_property_index)
+    end
+
+    if gamma and item_parts.batch_disassembly_supported then -- batch for multiple
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch item objects name")
+        check_value(batch_name_single, false, "single batch item objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple item objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single item objects name")
+        check_value(batch_mode_multiple, true, "multiple batch item objects mode")
+        check_value(mode_multiple, true, "multiple item objects mode")
+        check_value(mode_single, true, "single item objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], false, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], false, "batch_conts_multiple:actor_belt")
+        check_value(batch_conts_multiple["npc_bag"], true, "batch_conts_multiple:npc_bag")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_multiple["npc_bag"], true, "conts_multiple:npc_bag")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+        check_value(conts_single["npc_bag"], true, "conts_single:npc_bag")
+    elseif gamma and not item_parts.batch_disassembly_supported then -- batch for everything
+        check_value(batch_name_multiple, false, "multiple batch item objects name")
+        check_value(batch_name_single, false, "single batch item objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple item objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single item objects name")
+        check_value(mode_multiple, true, "multiple item objects mode")
+        check_value(mode_single, true, "single item objects mode")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_multiple["npc_bag"], true, "conts_multiple:npc_bag")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+        check_value(conts_single["npc_bag"], true, "conts_single:npc_bag")
+    elseif not gamma and item_parts.batch_disassembly_supported then -- batch for multiple
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch item objects name")
+        check_value(batch_name_single, false, "single batch item objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple item objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single item objects name")
+        check_value(batch_mode_multiple, true, "multiple batch item objects mode")
+        check_value(mode_multiple, true, "multiple item objects mode")
+        check_value(mode_single, true, "single item objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], false, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], false, "batch_conts_multiple:actor_belt")
+        check_value(batch_conts_multiple["npc_bag"], true, "batch_conts_multiple:npc_bag")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_multiple["npc_bag"], true, "conts_multiple:npc_bag")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+        check_value(conts_single["npc_bag"], true, "conts_single:npc_bag")
+    else -- not gamma and not item_parts.batch_disassembly_supported -- no batch
+        check_value(batch_name_multiple, false, "multiple batch item objects name")
+        check_value(batch_name_single, false, "single batch item objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple item objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single item objects name")
+        check_value(mode_multiple, true, "multiple item objects mode")
+        check_value(mode_single, true, "single item objects mode")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_multiple["npc_bag"], true, "conts_multiple:npc_bag")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+        check_value(conts_single["npc_bag"], true, "conts_single:npc_bag")
+    end
+
+    close_inventory()
+end
+
+local function batch_item_on_dead_stalker()
+    if not item_parts.batch_disassembly_supported then
+       return
+    end
+
+    prepare_dead_stalker()
+
+    create_item("leatherman_tool")
+    local actor_item = create_item("bandage")
+    create_item("bandage")
+    local npc_item = create_item("bandage", nil, dead_stalker)
+    create_item("bandage", nil, dead_stalker)
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 1},
+        {sec = "bandage"},
+        {sec = "bandage"},
+    })
+
+    check_ruck({
+        {sec = "bandage"},
+        {sec = "bandage"},
+    }, dead_stalker)
+
+    check_tips({})
+    check_fxs({})
+    check_statistics({})
+
+    loot_dead_stalker()
+    coroutine.yield()
+
+    ui_inventory.GUI:Action_Custom(actor_item, "actor_bag", nil, 10)
+    coroutine.yield()
+    
+    check_ruck({
+        {sec = "leatherman_tool", cond = 38/40},
+        {sec = "prt_o_fabrics_3"},
+        {sec = "prt_o_fabrics_3"},
+    })
+
+    check_ruck({
+        {sec = "bandage"},
+        {sec = "bandage"},
+    }, dead_stalker)
+
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- 2 prt_o_fabrics_3", icon = "leatherman_tool"},
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+    
+    create_item("bandage")
+    create_item("bandage")
+    coroutine.yield(0.2)
+
+    ui_inventory.GUI:Action_Custom(npc_item, "npc_bag", nil, 10)
+    coroutine.yield()
+    
+    check_ruck({
+        {sec = "leatherman_tool", cond = 36/40},
+        {sec = "prt_o_fabrics_3"},
+        {sec = "prt_o_fabrics_3"},
+        {sec = "bandage"},
+        {sec = "bandage"},
+    })
+
+    check_ruck({
+        {sec = "prt_o_fabrics_3"},
+        {sec = "prt_o_fabrics_3"},
+    }, dead_stalker)
+
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- 2 prt_o_fabrics_3", icon = "leatherman_tool"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- 2 prt_o_fabrics_3", icon = "leatherman_tool"},
+    })
+    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled", "items_disassembled", "items_disassembled"})
+
+    ui_inventory.hide_inventory()
+    coroutine.yield()
+end
+
+local function outfit_by_leatherman()
+    create_item("leatherman_tool")    
+    local outfit = create_item("novice_outfit")
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_2", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function outfit_by_leatherman_delay()
+    enable_animations()
+    create_item("leatherman_tool")    
+    local outfit = create_item("novice_outfit")
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    check_ruck(expected)
+    check_tips({})
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+
+    coroutine.yield(4)
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_2", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function outfit_by_leatherman_protection()
+    enable_disassembly_warning()
+    create_item("leatherman_tool")
+    local outfit = create_item("novice_outfit")
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "novice_outfit"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+    
+    SendScriptCallback("on_key_press", DIK_keys["DIK_LMENU"])
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_2", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+
+    outfit = create_item("novice_outfit")
+    
+    SendScriptCallback("on_key_release", DIK_keys["DIK_LMENU"])
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_2", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "novice_outfit"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"},
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function outfit_by_grooming()
+    create_item("grooming")
+    local outfit = create_item("novice_outfit")
+    
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "grooming", cond = 0.91})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_2", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function outfit_by_swiss()
+    create_item("swiss_knife")
+    local outfit = create_item("novice_outfit")
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "swiss_knife", cond = 0.91})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_2", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function outfit_no_tool()
+
+    local outfit = create_item("novice_outfit")
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "bandage"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_news_dis_items", icon = "swiss_knife"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function outfit_by_leatherman_with_upgrade()
+
+    create_item("swiss_knife")
+    local outfit = create_item("novice_outfit", 0.6)
+
+    local upgrades = utils_item.get_upgrades_tree(outfit:section())
+    for k,v in pairs(upgrades) do
+        printf("upgrade[%s] = ", k)
+        for k2,v2 in pairs(v) do
+            printf("    [%s] = %s", k2, v2)
+            for k3,v3 in pairs(v2) do
+                printf("        [%s] = %s", k3, v3)
+            end
+        end
+    end
+
+    inventory_upgrades.force_upgrade = true
+    outfit:install_upgrade("up_firsta_novice_1")
+    outfit:install_upgrade("up_firstc_novice_1")
+    outfit:install_upgrade("up_firste_novice_1")
+    inventory_upgrades.force_upgrade = false
+
+    math.randomseed(gamma and 340 or 356)
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local upgrade_name = gamma and "upgr_o_3_physical" or "upgr_o_2_damage"
+    local expected = {}
+    table.insert(expected, {sec = "swiss_knife", cond = 0.91})
+    table.insert(expected, {sec = "prt_o_fabrics_1"})
+    table.insert(expected, {sec = "prt_o_fabrics_2"})
+    table.insert(expected, {sec = "prt_o_fabrics_3"})
+    --if gamma then
+        table.insert(expected, {sec = upgrade_name})
+    --else
+    --    table.insert(expected, {sec = "upgr_o_3_armor"})
+    --end
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2\\n- " .. upgrade_name, icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function damaged_outfit_by_leatherman()
+    create_item("leatherman_tool")
+
+    local outfit = create_item("novice_outfit", 0.6)
+
+    local parts = item_parts.get_parts_con(outfit, nil, true)
+
+    parts.prt_o_fabrics_1 = 40
+    parts.prt_o_fabrics_2 = 60
+    parts.prt_o_fabrics_3 = 80
+    
+    item_parts.set_parts_con(outfit:id(), parts)
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    local exact_conditions = gamma or item_parts.batch_disassembly_supported
+    -- Conditions below for vanilla parts are wrong because of the bug that was fixed by Fermuto in gamma
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = exact_conditions and 0.4 or new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_2", cond = exact_conditions and 0.6 or 0.5})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = exact_conditions and 0.8 or 0.75})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function helmet_by_leatherman()
+    create_item("leatherman_tool")
+    local outfit = create_item("helm_cloth_mask")
+    
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_8 %c[255,51,255,102] helm_cloth_mask %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_1\\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function damaged_helmet_by_leatherman_no_parts()
+    create_item("leatherman_tool")
+    local outfit = create_item("helm_bandana", 0.1)
+
+    local parts = item_parts.get_parts_con(outfit, nil, true)
+
+    parts.prt_o_fabrics_3 = 10
+    
+    item_parts.set_parts_con(outfit:id(), parts)
+
+    math.randomseed(458) -- seed that guarantees than no parts drps
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_10 %c[255,204,0,51] helm_bandana %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function damaged_helmet_by_leatherman_no_parts_delay()
+    enable_animations()
+
+    create_item("leatherman_tool")
+
+    local outfit = create_item("helm_bandana", 0.1)
+
+    local parts = item_parts.get_parts_con(outfit, nil, true)
+
+    parts.prt_o_fabrics_3 = 10
+    
+    item_parts.set_parts_con(outfit:id(), parts)
+
+    math.randomseed(458) -- seed that guarantees than no parts drps
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    check_ruck(expected)
+    check_tips({})
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+
+    coroutine.yield(4)
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_10 %c[255,204,0,51] helm_bandana %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function weapon_by_leatherman()
+    create_item("leatherman_tool")
+    local weapon = create_item("wpn_desert_eagle")
+
+    local parts = item_parts.get_parts_con(weapon, nil, true)
+
+    parts.prt_w_p_barrel_7 = 97
+    parts.prt_w_p_spring_6 = 98
+    parts.prt_w_p_trigger_1 = 99
+
+    item_parts.set_parts_con(weapon:id(), parts)
+
+    math.randomseed(gamma and 444 or 445)
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_w_p_barrel_7", cond = gamma and 0.97 or new_weapon_parts_condition})
+    table.insert(expected, {sec = "prt_w_p_spring_6", cond = gamma and 0.98 or new_weapon_parts_condition})
+    table.insert(expected, {sec = "prt_w_p_trigger_1", cond = gamma and 0.99 or new_weapon_parts_condition})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "ammo_357_hp_mag", ammo = 9})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_7 %c[255,51,255,102] wpn_desert_eagle %c[255,250,250,250] st_dis_text_9 \\n- prt_w_p_barrel_7\\n- prt_w_p_spring_6\\n- prt_w_p_trigger_1\\n- prt_i_scrap", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function weapon_by_leatherman_delay()
+    enable_animations()
+    create_item("leatherman_tool")    
+    local weapon = create_item("wpn_desert_eagle")
+    
+    local parts = item_parts.get_parts_con(weapon, nil, true)
+
+    parts.prt_w_p_barrel_7 = 97
+    parts.prt_w_p_spring_6 = 98
+    parts.prt_w_p_trigger_1 = 99
+
+    item_parts.set_parts_con(weapon:id(), parts)
+
+    math.randomseed(gamma and 444 or 445)
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "ammo_357_hp_mag", ammo = 9})
+    check_ruck(expected)
+    check_tips({})
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    coroutine.yield(4)
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_w_p_barrel_7", cond = gamma and 0.97 or new_weapon_parts_condition})
+    table.insert(expected, {sec = "prt_w_p_spring_6", cond = gamma and 0.98 or new_weapon_parts_condition})
+    table.insert(expected, {sec = "prt_w_p_trigger_1", cond = gamma and 0.99 or new_weapon_parts_condition})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "ammo_357_hp_mag", ammo = 9})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_7 %c[255,51,255,102] wpn_desert_eagle %c[255,250,250,250] st_dis_text_9 \\n- prt_w_p_barrel_7\\n- prt_w_p_spring_6\\n- prt_w_p_trigger_1\\n- prt_i_scrap", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function weapon_by_leatherman_protection()
+    enable_disassembly_warning()
+    create_item("leatherman_tool")
+    local weapon = create_item("wpn_desert_eagle")
+
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "wpn_desert_eagle", cond = 1})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+    
+    SendScriptCallback("on_key_press", DIK_keys["DIK_LMENU"])
+
+    math.randomseed(gamma and 444 or 445)
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_w_p_barrel_7"})
+    table.insert(expected, {sec = "prt_w_p_spring_6"})
+    table.insert(expected, {sec = "prt_w_p_trigger_1"})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "ammo_357_hp_mag", ammo = 9})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = "st_dis_text_7 %c[255,51,255,102] wpn_desert_eagle %c[255,250,250,250] st_dis_text_9 \\n- prt_w_p_barrel_7\\n- prt_w_p_spring_6\\n- prt_w_p_trigger_1\\n- prt_i_scrap", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    outfit = create_item("wpn_desert_eagle")
+    
+    SendScriptCallback("on_key_release", DIK_keys["DIK_LMENU"])
+
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_w_p_barrel_7"})
+    table.insert(expected, {sec = "prt_w_p_spring_6"})
+    table.insert(expected, {sec = "prt_w_p_trigger_1"})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "ammo_357_hp_mag", ammo = 9})
+    table.insert(expected, {sec = "wpn_desert_eagle"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = "st_dis_text_7 %c[255,51,255,102] wpn_desert_eagle %c[255,250,250,250] st_dis_text_9 \\n- prt_w_p_barrel_7\\n- prt_w_p_spring_6\\n- prt_w_p_trigger_1\\n- prt_i_scrap", icon = "leatherman_tool"},
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function weapon_by_swiss()
+    create_item("swiss_knife")
+    local weapon = create_item("wpn_desert_eagle")
+
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "swiss_knife", cond = 1})
+    table.insert(expected, {sec = "wpn_desert_eagle", cond = 1})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_3 %c[255,204,0,51]   %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function weapon_by_grooming()
+    create_item("grooming")
+    local weapon = create_item("wpn_desert_eagle")
+
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "grooming", cond = 1})
+    table.insert(expected, {sec = "wpn_desert_eagle", cond = 1})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_3 %c[255,204,0,51]   %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function weapon_no_tool()
+
+    local weapon = create_item("wpn_desert_eagle")
+
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "wpn_desert_eagle"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_3 %c[255,204,0,51]   %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function weapon_with_attachements()
+    create_item("leatherman_tool")
+    local weapon = create_item("wpn_sig550_camo")
+    local silencer = create_item("wpn_sil_nato")
+    local scope = create_item("eot")
+    local launcher = create_item("wpn_addon_grenade_launcher_m203")
+
+    check_ruck({
+        {sec = "leatherman_tool"},
+        {sec = "wpn_sig550_camo"},
+        {sec = "wpn_sil_nato"},
+        {sec = "eot"},
+        {sec = "wpn_addon_grenade_launcher_m203"}
+    })
+
+    utils_item.attach_addon(weapon, silencer, "sil", true)
+    coroutine.yield()
+    utils_item.attach_addon(weapon, launcher, "gl", true)
+    coroutine.yield()
+    utils_item.attach_addon(weapon, scope, "scope", true)
+    coroutine.yield()
+
+    check_ruck({
+        {sec = "leatherman_tool"},
+        {sec = "wpn_sig550_camo_eot"}
+    })
+
+    db.actor:iterate_ruck(function(temp, item)
+        if item:section() == "wpn_sig550_camo_eot" then
+            weapon = item
+            return true
+        end
+    end)
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    dump_ruck_content()
+
+    local upgrade_name = gamma and "upgr_w_1_external" or "upgr_w_1_inertion"
+    check_ruck({
+        {sec = "leatherman_tool", cond = 39/40},
+        {sec = "ammo_5.56x45_fmj", ammo = 15},
+        {sec = "ammo_5.56x45_fmj", ammo = 15},
+        {sec = "wpn_sil_nato"},
+        {sec = "eot"},
+        {sec = "wpn_addon_grenade_launcher_m203"},
+        {sec = "prt_w_bolt_carrier_3"},
+        {sec = "prt_w_trigger_components_3"},
+        {sec = "prt_w_gas_tube_6"},
+        {sec = "prt_w_barrel_9"},
+        {sec = "prt_w_bolt_9"},
+        {sec = "prt_i_scrap"},
+        {sec = upgrade_name},
+    })
+    check_tips({
+        {msg = "st_dis_text_7 %c[255,51,255,102] wpn_sig550_camo_eot %c[255,250,250,250] st_dis_text_9 \\n- eot\\n- wpn_sil_nato\\n- wpn_addon_grenade_launcher_m203\\n- prt_w_bolt_carrier_3\\n- prt_w_trigger_components_3\\n- prt_w_gas_tube_6\\n- prt_w_barrel_9\\n- prt_w_bolt_9\\n- prt_i_scrap\\n- " .. upgrade_name, icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function weapon_with_stripped_part()
+    if not gamma then
+        return
+    end
+    create_item("leatherman_tool")
+    local weapon = create_item("wpn_desert_eagle")
+
+    local parts = item_parts.get_parts_con(weapon, nil, true)
+
+    parts.prt_w_p_barrel_7 = 100
+    parts.prt_w_p_spring_6 = -1
+    parts.prt_w_p_trigger_1 = 100
+
+    item_parts.set_parts_con(weapon:id(), parts)
+
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_w_p_barrel_7", cond = 0.999})
+    table.insert(expected, {sec = "prt_w_p_trigger_1", cond = 0.999})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "ammo_357_hp_mag", ammo = 9})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_7 %c[255,51,255,102] wpn_desert_eagle %c[255,250,250,250] st_dis_text_9 \\n- prt_w_p_barrel_7\\n- prt_w_p_trigger_1\\n- prt_i_scrap", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function ammo_by_leatherman()
+    create_item("leatherman_tool")
+    local ammo = create_item("ammo_5.56x45_fmj")
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.99},
+            {sec = "bullet_r5", ammo = 14},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 1},
+            {sec = "powder_2", ammo = 10},
+        })
+    else
+        check_ruck({
+            {sec = "leatherman_tool", cond = 39/40},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 14 bullet_r5\\n- 16 casing_r5\\n- 10 powder_2"
+                     or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function ammo_by_leatherman_partial_mag()
+    create_item("leatherman_tool")
+    local ammo = create_item("ammo_5.56x45_fmj")
+    ammo:ammo_set_count(1)
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.99},
+            {sec = "bullet_r5", ammo = 2},
+            {sec = "casing_r5", ammo = 2},
+        })
+    else
+        check_ruck({
+            {sec = "leatherman_tool", cond = 39/40},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 2 casing_r5\\n- 2 bullet_r5"
+        or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function ammo_by_leatherman_delay()
+    enable_animations()
+    
+    create_item("leatherman_tool")
+    local ammo = create_item("ammo_5.56x45_fmj")
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    local expected = {}
+    check_ruck({{sec = "leatherman_tool", cond = gamma and 0.99 or 39/40}})
+    check_tips({})
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    coroutine.yield(4)
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.99},
+            {sec = "bullet_r5", ammo = 14},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 1},
+            {sec = "powder_2", ammo = 10},
+        })
+    else
+        check_ruck({
+            {sec = "leatherman_tool", cond = 39/40},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 14 bullet_r5\\n- 16 casing_r5\\n- 10 powder_2"
+                     or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function ammo_by_leatherman_protection()
+    enable_disassembly_warning()
+
+    create_item("leatherman_tool")
+    local ammo = create_item("ammo_5.56x45_fmj")
+
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 1},
+        {sec = "ammo_5.56x45_fmj", ammo = 15}
+    })
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+    
+    SendScriptCallback("on_key_press", DIK_keys["DIK_LMENU"])
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.99},
+            {sec = "bullet_r5", ammo = 14},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 1},
+            {sec = "powder_2", ammo = 10},
+        })
+    else
+        check_ruck({
+            {sec = "leatherman_tool", cond = 39/40},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 14 bullet_r5\\n- 16 casing_r5\\n- 10 powder_2"
+                     or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    ammo = create_item("ammo_5.56x45_fmj")
+
+    SendScriptCallback("on_key_release", DIK_keys["DIK_LMENU"])
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.99},
+            {sec = "ammo_5.56x45_fmj", ammo = 15},
+            {sec = "bullet_r5", ammo = 14},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 1},
+            {sec = "powder_2", ammo = 10},
+        })
+    else
+        check_ruck({
+            {sec = "leatherman_tool", cond = 39/40},
+            {sec = "ammo_5.56x45_fmj", ammo = 15},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 14 bullet_r5\\n- 16 casing_r5\\n- 10 powder_2"
+                     or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"},
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function ammo_by_grooming()
+    create_item("grooming")
+    local ammo = create_item("ammo_5.56x45_fmj")
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "grooming", cond = 0.99},
+            {sec = "bullet_r5", ammo = 14},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 1},
+            {sec = "powder_2", ammo = 10},
+        })
+    else
+        check_ruck({
+            {sec = "grooming", cond = 0.91},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 14 bullet_r5\\n- 16 casing_r5\\n- 10 powder_2"
+                     or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function ammo_by_swiss()
+    create_item("swiss_knife")
+    local ammo = create_item("ammo_5.56x45_fmj")
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "swiss_knife", cond = 0.99},
+            {sec = "bullet_r5", ammo = 14},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 1},
+            {sec = "powder_2", ammo = 10},
+        })
+    else
+        check_ruck({
+            {sec = "swiss_knife", cond = 0.91},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 14 bullet_r5\\n- 16 casing_r5\\n- 10 powder_2"
+                     or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function ammo_no_tool()
+
+    local ammo = create_item("ammo_5.56x45_fmj")
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    check_ruck({
+        {sec = "ammo_5.56x45_fmj", ammo = 15},
+    })
+    check_tips({
+        {msg = "st_news_dis_items", icon = "swiss_knife"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function ammo_tool_selection()
+    create_item("swiss_knife")
+    create_item("leatherman_tool")
+    create_item("grooming")
+    local ammo = create_item("ammo_5.56x45_fmj")
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, 6)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.99},
+            {sec = "swiss_knife", cond = 1},
+            {sec = "grooming", cond = 1},
+            {sec = "bullet_r5", ammo = 14},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 1},
+            {sec = "powder_2", ammo = 10},
+        })
+    else
+        check_ruck({
+            {sec = "swiss_knife", cond = 0.91},
+            {sec = "grooming", cond = 1},
+            {sec = "leatherman_tool", cond = 1},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 14 bullet_r5\\n- 16 casing_r5\\n- 10 powder_2"
+                     or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function batch_ammo()
+    create_item("leatherman_tool")
+    local ammo = create_item("ammo_5.56x45_fmj")
+    create_item("ammo_5.56x45_fmj")
+    create_item("ammo_5.56x45_fmj")
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, ammo_batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.988},
+            {sec = "bullet_r5", ammo = 15},
+            {sec = "bullet_r5", ammo = 15},
+            {sec = "bullet_r5", ammo = 8},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 4},
+            {sec = "powder_2", ammo = 15},
+            {sec = "powder_2", ammo = 15},
+            {sec = "powder_2", ammo = 4},
+        })
+        check_tips({
+            {msg = "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 38 bullet_r5\\n- 34 casing_r5\\n- 34 powder_2", icon = "leatherman_tool"}
+        })
+        check_fxs({"disassemble_metal_fast"})
+        check_statistics({"items_disassembled"})
+    elseif item_parts.batch_disassembly_enabled then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 37/40},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+        check_tips({
+            {msg = "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 6 prt_i_ammo", icon = "leatherman_tool"}
+        })
+        check_fxs({"disassemble_metal_fast"})
+        check_statistics({"items_disassembled", "items_disassembled", "items_disassembled"})
+    else
+        check_ruck({
+            {sec = "leatherman_tool", cond = 1},
+            {sec = "ammo_5.56x45_fmj", ammo = 15},
+            {sec = "ammo_5.56x45_fmj", ammo = 15},
+            {sec = "ammo_5.56x45_fmj", ammo = 15},})
+        check_tips({})
+        check_fxs({})
+        check_statistics({})
+    end
+end
+
+local function ammo_inventory_menu_entries()
+    create_item("leatherman_tool")
+    local ammo_multiple = create_item("ammo_5.56x45_fmj")
+    create_item("ammo_5.56x45_fmj")
+    create_item("ammo_5.56x45_fmj")
+    local ammo_single = create_item("ammo_5.56x45_ap")
+
+    open_inventory()
+
+    local batch_name_multiple = ui_inventory.GUI:Name_Custom(ammo_multiple, "actor_bag", nil, ammo_batch_disassembly_property_index)
+    local batch_name_single = ui_inventory.GUI:Name_Custom(ammo_single, "actor_bag", nil, ammo_batch_disassembly_property_index)
+    local name_multiple = ui_inventory.GUI:Name_Custom(ammo_multiple, "actor_bag", nil, disassembly_property_index)
+    local name_single = ui_inventory.GUI:Name_Custom(ammo_single, "actor_bag", nil, disassembly_property_index)
+    local batch_mode_multiple
+    local batch_mode_single
+    local mode_multiple
+    local mode_single
+    local batch_conts_multiple
+    local batch_conts_single
+    local conts_multiple
+    local conts_single
+
+    local enum_conts = function(obj, index)
+        local containers = {"actor_bag", "actor_equ", "actor_belt"}
+        local res = {}
+        for i,v in pairs(containers) do
+            res[v] = ui_inventory.GUI:Cont_Custom(obj, v, nil, index)
+        end
+        return res
+    end
+
+    if batch_name_multiple then
+        batch_mode_multiple = ui_inventory.GUI:Mode_Custom(ammo_multiple, "actor_bag", nil, ammo_batch_disassembly_property_index)
+        batch_conts_multiple = enum_conts(ammo_multiple, ammo_batch_disassembly_property_index)
+    end
+    if batch_name_single then
+        batch_mode_single = ui_inventory.GUI:Mode_Custom(ammo_single, "actor_bag", nil, ammo_batch_disassembly_property_index)
+        batch_conts_single = enum_conts(ammo_single, ammo_batch_disassembly_property_index)
+    end
+    if name_multiple then
+        mode_multiple = ui_inventory.GUI:Mode_Custom(ammo_multiple, "actor_bag", nil, disassembly_property_index)
+        conts_multiple = enum_conts(ammo_multiple, disassembly_property_index)
+    end
+    if name_single then
+        mode_single = ui_inventory.GUI:Mode_Custom(ammo_single, "actor_bag", nil, disassembly_property_index)
+        conts_single = enum_conts(ammo_single, disassembly_property_index)
+    end
+
+    if gamma and item_parts.batch_disassembly_supported then -- batch for multiple
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch ammo objects name")
+        check_value(batch_name_single, false, "single batch ammo objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple ammo objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single ammo objects name")
+        check_value(batch_mode_multiple, true, "multiple batch ammo objects mode")
+        check_value(mode_multiple, true, "multiple ammo objects mode")
+        check_value(mode_single, true, "single ammo objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], false, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], false, "batch_conts_multiple:actor_belt")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+    elseif gamma and not item_parts.batch_disassembly_supported then -- batch for everything
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch ammo objects name")
+        check_value(batch_name_single, "st_batch_breakdown", "single batch ammo objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple ammo objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single ammo objects name")
+        check_value(batch_mode_multiple, true, "multiple batch ammo objects mode")
+        check_value(batch_mode_single, true, "single batch ammo objects mode")
+        check_value(mode_multiple, true, "multiple ammo objects mode")
+        check_value(mode_single, true, "single ammo objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], true, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], true, "batch_conts_multiple:actor_belt")
+        check_value(batch_conts_single["actor_bag"], true, "batch_conts_single:actor_bag")
+        check_value(batch_conts_single["actor_equ"], true, "batch_conts_single:actor_equ")
+        check_value(batch_conts_single["actor_belt"], true, "batch_conts_single:actor_belt")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+    elseif not gamma and item_parts.batch_disassembly_supported then -- batch for multiple
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch ammo objects name")
+        check_value(batch_name_single, false, "single batch ammo objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple ammo objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single ammo objects name")
+        check_value(batch_mode_multiple, true, "multiple batch ammo objects mode")
+        check_value(mode_multiple, true, "multiple ammo objects mode")
+        check_value(mode_single, true, "single ammo objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], false, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], false, "batch_conts_multiple:actor_belt")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+    else -- not gamma and not item_parts.batch_disassembly_supported -- no batch
+        check_value(batch_name_multiple, false, "multiple batch ammo objects name")
+        check_value(batch_name_single, false, "single batch ammo objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple ammo objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single ammo objects name")
+        check_value(mode_multiple, true, "multiple ammo objects mode")
+        check_value(mode_single, true, "single ammo objects mode")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+    end
+end
+
+local function ammo_loot_menu_entries()
+    create_item("leatherman_tool")
+    local ammo_multiple = create_item("ammo_5.56x45_fmj")
+    create_item("ammo_5.56x45_fmj")
+    create_item("ammo_5.56x45_fmj")
+    local ammo_single = create_item("ammo_5.56x45_ap")
+
+    prepare_dead_stalker()
+    loot_dead_stalker()
+
+    local batch_name_multiple = ui_inventory.GUI:Name_Custom(ammo_multiple, "actor_bag", nil, ammo_batch_disassembly_property_index)
+    local batch_name_single = ui_inventory.GUI:Name_Custom(ammo_single, "actor_bag", nil, ammo_batch_disassembly_property_index)
+    local name_multiple = ui_inventory.GUI:Name_Custom(ammo_multiple, "actor_bag", nil, disassembly_property_index)
+    local name_single = ui_inventory.GUI:Name_Custom(ammo_single, "actor_bag", nil, disassembly_property_index)
+    local batch_mode_multiple
+    local batch_mode_single
+    local mode_multiple
+    local mode_single
+    local batch_conts_multiple
+    local batch_conts_single
+    local conts_multiple
+    local conts_single
+
+    local enum_conts = function(obj, index)
+        local containers = {"actor_bag", "actor_equ", "actor_belt", "npc_bag"}
+        local res = {}
+        for i,v in pairs(containers) do
+            res[v] = ui_inventory.GUI:Cont_Custom(obj, v, nil, index)
+        end
+        return res
+    end
+
+    if batch_name_multiple then
+        batch_mode_multiple = ui_inventory.GUI:Mode_Custom(ammo_multiple, "actor_bag", nil, ammo_batch_disassembly_property_index)
+        batch_conts_multiple = enum_conts(ammo_multiple, ammo_batch_disassembly_property_index)
+    end
+    if batch_name_single then
+        batch_mode_single = ui_inventory.GUI:Mode_Custom(ammo_single, "actor_bag", nil, ammo_batch_disassembly_property_index)
+        batch_conts_single = enum_conts(ammo_single, ammo_batch_disassembly_property_index)
+    end
+    if name_multiple then
+        mode_multiple = ui_inventory.GUI:Mode_Custom(ammo_multiple, "actor_bag", nil, disassembly_property_index)
+        conts_multiple = enum_conts(ammo_multiple, disassembly_property_index)
+    end
+    if name_single then
+        mode_single = ui_inventory.GUI:Mode_Custom(ammo_single, "actor_bag", nil, disassembly_property_index)
+        conts_single = enum_conts(ammo_single, disassembly_property_index)
+    end
+
+    if gamma and item_parts.batch_disassembly_supported then -- batch for multiple
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch ammo objects name")
+        check_value(batch_name_single, false, "single batch ammo objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple ammo objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single ammo objects name")
+        check_value(batch_mode_multiple, true, "multiple batch ammo objects mode")
+        check_value(mode_multiple, true, "multiple ammo objects mode")
+        check_value(mode_single, true, "single ammo objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], false, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], false, "batch_conts_multiple:actor_belt")
+        check_value(batch_conts_multiple["npc_bag"], false, "batch_conts_multiple:npc_bag")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_multiple["npc_bag"], true, "conts_multiple:npc_bag")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+        check_value(conts_single["npc_bag"], true, "conts_single:npc_bag")
+    elseif gamma and not item_parts.batch_disassembly_supported then -- batch for everything
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch ammo objects name")
+        check_value(batch_name_single, "st_batch_breakdown", "single batch ammo objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple ammo objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single ammo objects name")
+        check_value(batch_mode_multiple, false, "multiple batch ammo objects mode")
+        check_value(batch_mode_single, false, "single batch ammo objects mode")
+        check_value(mode_multiple, true, "multiple ammo objects mode")
+        check_value(mode_single, true, "single ammo objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], true, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], true, "batch_conts_multiple:actor_belt")
+        check_value(batch_conts_multiple["npc_bag"], false, "batch_conts_multiple:npc_bag")
+        check_value(batch_conts_single["actor_bag"], true, "batch_conts_single:actor_bag")
+        check_value(batch_conts_single["actor_equ"], true, "batch_conts_single:actor_equ")
+        check_value(batch_conts_single["actor_belt"], true, "batch_conts_single:actor_belt")
+        check_value(batch_conts_single["npc_bag"], false, "batch_conts_single:npc_bag")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_multiple["npc_bag"], true, "conts_multiple:npc_bag")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+        check_value(conts_single["npc_bag"], true, "conts_single:npc_bag")
+    elseif not gamma and item_parts.batch_disassembly_supported then -- batch for multiple
+        check_value(batch_name_multiple, "st_batch_breakdown", "multiple batch ammo objects name")
+        check_value(batch_name_single, false, "single batch ammo objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple ammo objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single ammo objects name")
+        check_value(batch_mode_multiple, true, "multiple batch ammo objects mode")
+        check_value(mode_multiple, true, "multiple ammo objects mode")
+        check_value(mode_single, true, "single ammo objects mode")
+        check_value(batch_conts_multiple["actor_bag"], true, "batch_conts_multiple:actor_bag")
+        check_value(batch_conts_multiple["actor_equ"], false, "batch_conts_multiple:actor_equ")
+        check_value(batch_conts_multiple["actor_belt"], false, "batch_conts_multiple:actor_belt")
+        check_value(batch_conts_multiple["npc_bag"], true, "batch_conts_multiple:npc_bag")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_multiple["npc_bag"], true, "conts_multiple:npc_bag")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+        check_value(conts_single["npc_bag"], true, "conts_single:npc_bag")
+    else -- not gamma and not item_parts.batch_disassembly_supported -- no batch
+        check_value(batch_name_multiple, false, "multiple batch ammo objects name")
+        check_value(batch_name_single, false, "single batch ammo objects name")
+        check_value(name_multiple, "st_awr_disassembly_cloth", "multiple ammo objects name")
+        check_value(name_single, "st_awr_disassembly_cloth", "single ammo objects name")
+        check_value(mode_multiple, true, "multiple ammo objects mode")
+        check_value(mode_single, true, "single ammo objects mode")
+        check_value(conts_multiple["actor_bag"], true, "conts_multiple:actor_bag")
+        check_value(conts_multiple["actor_equ"], true, "conts_multiple:actor_equ")
+        check_value(conts_multiple["actor_belt"], true, "conts_multiple:actor_belt")
+        check_value(conts_multiple["npc_bag"], true, "conts_multiple:npc_bag")
+        check_value(conts_single["actor_bag"], true, "conts_single:actor_bag")
+        check_value(conts_single["actor_equ"], true, "conts_single:actor_equ")
+        check_value(conts_single["actor_belt"], true, "conts_single:actor_belt")
+        check_value(conts_single["npc_bag"], true, "conts_single:npc_bag")
+    end
+
+    close_inventory()
+end
+
+local function batch_ammo_change_index()
+    if not item_parts.batch_disassembly_supported then
+        return
+     end
+
+    test_index = function(index)
+        printf("testing index %s", index)
+
+        item_parts.batch_disassembly_property_index = index
+
+        create_item("leatherman_tool")
+        local ammo = create_item("ammo_5.56x45_fmj")
+        create_item("ammo_5.56x45_fmj")
+        create_item("ammo_5.56x45_fmj")
+
+        math.randomseed(444)
+        ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, item_parts.batch_disassembly_property_index)
+
+        coroutine.yield()
+
+        if gamma and item_parts.batch_disassembly_supported then
+            check_ruck({
+                {sec = "leatherman_tool", cond = 0.988},
+                {sec = "bullet_r5", ammo = 15},
+                {sec = "bullet_r5", ammo = 15},
+                {sec = "bullet_r5", ammo = 8},
+                {sec = "casing_r5", ammo = 15},
+                {sec = "casing_r5", ammo = 15},
+                {sec = "casing_r5", ammo = 4},
+                {sec = "powder_2", ammo = 15},
+                {sec = "powder_2", ammo = 15},
+                {sec = "powder_2", ammo = 4},
+            })
+            check_tips({
+                {msg = "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 38 bullet_r5\\n- 34 casing_r5\\n- 34 powder_2", icon = "leatherman_tool"}
+            })
+            check_fxs({"disassemble_metal_fast"})
+            check_statistics({"items_disassembled"})
+        elseif item_parts.batch_disassembly_supported then
+            check_ruck({
+                {sec = "leatherman_tool", cond = 37/40},
+                {sec = "prt_i_ammo"},
+                {sec = "prt_i_ammo"},
+                {sec = "prt_i_ammo"},
+                {sec = "prt_i_ammo"},
+                {sec = "prt_i_ammo"},
+                {sec = "prt_i_ammo"},
+            })
+            check_tips({
+                {msg = "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 6 prt_i_ammo", icon = "leatherman_tool"}
+            })
+            check_fxs({"disassemble_metal_fast"})
+            check_statistics({"items_disassembled", "items_disassembled", "items_disassembled"})
+        else
+            check_ruck({
+                {sec = "leatherman_tool", cond = 1},
+                {sec = "ammo_5.56x45_fmj", ammo = 15},
+                {sec = "ammo_5.56x45_fmj", ammo = 15},
+                {sec = "ammo_5.56x45_fmj", ammo = 15},})
+            check_tips({})
+            check_fxs({})
+            check_statistics({})
+        end
+
+        prepare()
+    end
+
+    test_index(9)
+    test_index(4)
+end
+
+local function batch_ammo_partial_mag()
+    create_item("leatherman_tool")
+    local ammo = create_item("ammo_5.56x45_fmj")
+    ammo:ammo_set_count(1)
+    ammo = create_item("ammo_5.56x45_fmj")
+    ammo:ammo_set_count(1)
+    ammo = create_item("ammo_5.56x45_fmj")
+    ammo:ammo_set_count(1)
+
+    math.randomseed(444)
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, ammo_batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.988},
+            {sec = "bullet_r5", ammo = 4},
+            {sec = "casing_r5", ammo = 4},
+        })
+        check_tips({
+            {msg = "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 4 casing_r5\\n- 4 bullet_r5", icon = "leatherman_tool"}
+        })
+        check_fxs({"disassemble_metal_fast"})
+        check_statistics({"items_disassembled"})
+    elseif item_parts.batch_disassembly_enabled then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 37/40},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+        check_tips({
+            {msg = "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 6 prt_i_ammo", icon = "leatherman_tool"}
+        })
+        check_fxs({"disassemble_metal_fast"})
+        check_statistics({"items_disassembled", "items_disassembled", "items_disassembled"})
+    else
+        check_ruck({
+            {sec = "leatherman_tool", cond = 1},
+            {sec = "ammo_5.56x45_fmj", ammo = 1},
+            {sec = "ammo_5.56x45_fmj", ammo = 1},
+            {sec = "ammo_5.56x45_fmj", ammo = 1},})
+        check_tips({})
+        check_fxs({})
+        check_statistics({})
+    end
+end
+
+local function item_by_dragged_leatherman()
+    local tool = create_item("leatherman_tool")
+    local bnd = create_item("bandage")
+
+    math.randomseed(444)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, bnd, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = 0.5})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+
+local function item_by_dragged_leatherman_delay()
+    enable_animations()
+    
+    local tool = create_item("leatherman_tool")
+    local bnd = create_item("bandage")
+
+    math.randomseed(444)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, bnd, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    check_ruck(expected)
+    check_tips({})
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    coroutine.yield(4)
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function item_by_dragged_leatherman_protection()
+    enable_disassembly_warning()
+
+    local tool = create_item("leatherman_tool")
+    local bnd = create_item("bandage")
+
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, bnd, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "bandage"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+    
+    SendScriptCallback("on_key_press", DIK_keys["DIK_LMENU"])
+
+    math.randomseed(444)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, bnd, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+
+    bnd = create_item("bandage")
+
+    SendScriptCallback("on_key_release", DIK_keys["DIK_LMENU"])
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, bnd, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    table.insert(expected, {sec = "bandage"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+        {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function item_by_dragged_grooming()
+    create_item("swiss_knife")
+    create_item("leatherman_tool")
+    local tool = create_item("grooming")
+    create_item("swiss_knife")
+    create_item("leatherman_tool")
+    local bnd = create_item("bandage")
+
+    math.randomseed(444)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, bnd, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "grooming", cond = 0.91})
+    table.insert(expected, {sec = "swiss_knife", cond = 1})
+    table.insert(expected, {sec = "swiss_knife", cond = 1})
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+
+local function weapon_by_dragged_leatherman()
+    create_item("swiss_knife")
+    local tool = create_item("leatherman_tool")
+    create_item("grooming")
+
+    local weapon = create_item("wpn_sig550_camo")
+    
+    local parts = item_parts.get_parts_con(weapon, nil, true)
+
+    parts.prt_w_bolt_carrier_3 = 97
+    parts.prt_w_trigger_components_3 = 98
+    parts.prt_w_gas_tube_6 = 99
+    parts.prt_w_barrel_9 = 96
+    parts.prt_w_bolt_9 = 95
+
+    item_parts.set_parts_con(weapon:id(), parts)
+    coroutine.yield()
+
+    local silencer = create_item("wpn_sil_nato")
+    local scope = create_item("eot")
+    local launcher = create_item("wpn_addon_grenade_launcher_m203")
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 1},
+        {sec = "grooming", cond = 1},
+        {sec = "swiss_knife", cond = 1},
+        {sec = "wpn_sig550_camo", cond = 1},
+        {sec = "wpn_sil_nato"},
+        {sec = "eot"},
+        {sec = "wpn_addon_grenade_launcher_m203"}
+    })
+
+    utils_item.attach_addon(weapon, silencer, "sil", true)
+    coroutine.yield()
+    utils_item.attach_addon(weapon, launcher, "gl", true)
+    coroutine.yield()
+    utils_item.attach_addon(weapon, scope, "scope", true)
+    coroutine.yield()
+
+    db.actor:iterate_ruck(function(temp, item)
+        if item:section() == "wpn_sig550_camo_eot" then
+            weapon = item
+            return true
+        end
+    end)
+
+    math.randomseed(444)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, weapon, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    local upgrade_name = gamma and "upgr_w_1_external" or "upgr_w_1_inertion"
+    check_ruck({
+        {sec = "leatherman_tool", cond = 39/40},
+        {sec = "grooming", cond = 1},
+        {sec = "swiss_knife", cond = 1},
+        {sec = "ammo_5.56x45_fmj", ammo = 15},
+        {sec = "ammo_5.56x45_fmj", ammo = 15},
+        {sec = "wpn_sil_nato"},
+        {sec = "eot"},
+        {sec = "wpn_addon_grenade_launcher_m203"},
+        {sec = "prt_w_bolt_carrier_3", cond = gamma and 0.97 or new_weapon_parts_condition},
+        {sec = "prt_w_trigger_components_3", cond = gamma and 0.98 or new_weapon_parts_condition},
+        {sec = "prt_w_gas_tube_6", cond = gamma and 0.99 or new_weapon_parts_condition},
+        {sec = "prt_w_barrel_9", cond = gamma and 0.96 or new_weapon_parts_condition},
+        {sec = "prt_w_bolt_9", cond = gamma and 0.95 or new_weapon_parts_condition},
+        {sec = "prt_i_scrap"},
+        {sec = upgrade_name},
+    })
+    check_tips({
+        {msg = "st_dis_text_7 %c[255,51,255,102] wpn_sig550_camo_eot %c[255,250,250,250] st_dis_text_9 \\n- eot\\n- wpn_sil_nato\\n- wpn_addon_grenade_launcher_m203\\n- prt_w_bolt_carrier_3\\n- prt_w_trigger_components_3\\n- prt_w_gas_tube_6\\n- prt_w_barrel_9\\n- prt_w_bolt_9\\n- prt_i_scrap\\n- " .. upgrade_name, icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+
+local function weapon_by_dragged_grooming()
+    create_item("swiss_knife")
+    create_item("leatherman_tool")
+    local tool = create_item("grooming")
+    create_item("swiss_knife")
+    create_item("leatherman_tool")
+    local weapon = create_item("wpn_desert_eagle")
+
+    math.randomseed(444)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, weapon, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "grooming", cond = 1})
+    table.insert(expected, {sec = "swiss_knife", cond = 1})
+    table.insert(expected, {sec = "swiss_knife", cond = 1})
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "wpn_desert_eagle", cond = 1})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_3 %c[255,204,0,51]   %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function weapon_by_dragged_swiss()
+    create_item("grooming")
+    create_item("leatherman_tool")
+    local tool = create_item("swiss_knife")
+    create_item("grooming")
+    create_item("leatherman_tool")
+    local weapon = create_item("wpn_desert_eagle")
+
+    math.randomseed(444)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, weapon, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "swiss_knife", cond = 1})
+    table.insert(expected, {sec = "grooming", cond = 1})
+    table.insert(expected, {sec = "grooming", cond = 1})
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "wpn_desert_eagle", cond = 1})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_3 %c[255,204,0,51]   %c[255,250,250,250]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function ammo_by_dragged_leatherman()
+    local tool = create_item("leatherman_tool")
+    local ammo = create_item("ammo_5.56x45_fmj")
+
+    math.randomseed(444)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, ammo, EDDListType.iActorBag, EDDListType.iActorBag)
+
+    coroutine.yield()
+
+    if gamma then
+        check_ruck({
+            {sec = "leatherman_tool", cond = 0.99},
+            {sec = "bullet_r5", ammo = 14},
+            {sec = "casing_r5", ammo = 15},
+            {sec = "casing_r5", ammo = 1},
+            {sec = "powder_2", ammo = 10},
+        })
+    else
+        check_ruck({
+            {sec = "leatherman_tool", cond = 39/40},
+            {sec = "prt_i_ammo"},
+            {sec = "prt_i_ammo"},
+        })
+    end
+    check_tips({
+        {msg = gamma and "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- 14 bullet_r5\\n- 16 casing_r5\\n- 10 powder_2"
+                     or "st_dis_text_11 %c[255,51,255,102] ammo_5.56x45_fmj %c[255,250,250,250] st_dis_text_9 \\n- prt_i_ammo\\n- prt_i_ammo", icon = "leatherman_tool"},
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function disassembly_item_override()
+    
+    local tool = create_item("leatherman_tool")
+    local item_overriden = create_item("detector_simple")
+    local item_nonoverriden = create_item("bandage")
+
+    local DisassemblyItem = item_parts.disassembly_item
+    item_parts.disassembly_item = function(obj, tool)
+        if (obj:section() == "detector_simple") then
+            utils_item.degrade( tool , 0.5 )
+            utils_item.discharge( obj )
+            game_statistics.increment_statistic("items_disassembled")
+            actor_effects.play_item_fx("disassemble_metal_fast")
+            local item = alife_create_item("prt_i_paper", db.actor)
+            news_manager.send_tip(db.actor, game.translate_string("st_news_dis_items"), nil, "swiss_knife", 6000)
+        else
+            DisassemblyItem(obj, tool)
+        end
+    end
+
+    
+    ui_inventory.GUI:Action_Custom(item_overriden, "actor_bag", nil, 6)
+    coroutine.yield()
+    ui_inventory.GUI:Action_Custom(item_nonoverriden, "actor_bag", nil, 6)
+    coroutine.yield()
+    item_parts.disassembly_item = DisassemblyItem
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 19/40},
+        {sec = "prt_o_fabrics_3"},
+        {sec = "prt_i_paper"},
+    })
+    check_tips({
+        {msg = "st_news_dis_items", icon = "swiss_knife"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+    })
+    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+local DisassemblyItem = item_parts.disassembly_item
+local function disassembly_item_dragged_override()
+    
+    local tool = create_item("leatherman_tool")
+    local item_overriden = create_item("detector_simple")
+    local item_nonoverriden = create_item("bandage")
+
+    item_parts.disassembly_item = function(obj, tool)
+        if (obj:section() == "detector_simple") then
+            utils_item.degrade( tool , 0.5 )
+            utils_item.discharge( obj )
+            game_statistics.increment_statistic("items_disassembled")
+            actor_effects.play_item_fx("disassemble_metal_fast")
+            local item = alife_create_item("prt_i_paper", db.actor)
+            news_manager.send_tip(db.actor, game.translate_string("st_news_dis_items"), nil, "swiss_knife", 6000)
+        else
+            DisassemblyItem(obj, tool)
+        end
+    end
+
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item_overriden, EDDListType.iActorBag, EDDListType.iActorBag)
+    coroutine.yield()
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item_nonoverriden, EDDListType.iActorBag, EDDListType.iActorBag)
+    coroutine.yield()
+    item_parts.disassembly_item = DisassemblyItem
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 19/40},
+        {sec = "prt_o_fabrics_3"},
+        {sec = "prt_i_paper"},
+    })
+    check_tips({
+        {msg = "st_news_dis_items", icon = "swiss_knife"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+    })
+    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+local function disassembly_item_partial_override()
+    
+    local tool = create_item("leatherman_tool")
+    local item_overriden = create_item("yadylin")
+    local item_nonoverriden = create_item("bandage")
+
+    item_parts.disassembly_item = function(obj, tool)
+        if (obj:section() == "yadylin") then
+            local item = alife_create_item("prt_i_paper", db.actor)
+            async_utils.yield_to_timer_task(0.1, "disassembly_item_partial_override" .. obj:id(), "d" .. obj:id())
+            DisassemblyItem(obj, tool)
+        else
+            DisassemblyItem(obj, tool)
+        end
+        printf("returning")
+    end
+
+    ui_inventory.GUI:Action_Custom(item_overriden, "actor_bag", nil, 6)
+    coroutine.yield(0.2)
+    ui_inventory.GUI:Action_Custom(item_nonoverriden, "actor_bag", nil, 6)
+    coroutine.yield(0.2)
+    item_parts.disassembly_item = DisassemblyItem
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 38/40},
+        {sec = "prt_o_fabrics_3"},
+        {sec = "prt_i_paper"},
+        {sec = "jar"},
+    })
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] yadylin %c[255,250,250,250] st_dis_text_9 \\n- jar", icon = "leatherman_tool"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+    })
+    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+local function disassembly_item_dragged_partial_override()
+    
+    local tool = create_item("leatherman_tool")
+    local item_overriden = create_item("yadylin")
+    local item_nonoverriden = create_item("bandage")
+
+    item_parts.disassembly_item = function(obj, tool)
+        if (obj:section() == "yadylin") then
+            local item = alife_create_item("prt_i_paper", db.actor)
+            async_utils.yield_to_timer_task(0.1, "disassembly_item_partial_override" .. obj:id(), "d" .. obj:id())
+            DisassemblyItem(obj, tool)
+        else
+            DisassemblyItem(obj, tool)
+        end
+        printf("returning")
+    end
+
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item_overriden, EDDListType.iActorBag, EDDListType.iActorBag)
+    coroutine.yield(0.2)
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item_nonoverriden, EDDListType.iActorBag, EDDListType.iActorBag)
+    coroutine.yield(0.2)
+    item_parts.disassembly_item = DisassemblyItem
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 38/40},
+        {sec = "prt_o_fabrics_3"},
+        {sec = "prt_i_paper"},
+        {sec = "jar"},
+    })
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] yadylin %c[255,250,250,250] st_dis_text_9 \\n- jar", icon = "leatherman_tool"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+    })
+    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+function create_tests_batch_1()
+    return {
+        {item_by_leatherman, "item_by_leatherman"},
+        {item_by_leatherman_delay, "item_by_leatherman_delay"},
+        {item_by_leatherman_protection, "item_by_leatherman_protection"},
+        {item_by_grooming, "item_by_grooming"},
+        {item_by_swiss, "item_by_swiss"},
+        {item_no_tool, "item_no_tool"},
+        {item_tool_selection, "item_tool_selection"},
+        {batch_several_tools_selection, "batch_several_tools_selection"},
+        {batch_not_enough_tools, "batch_not_enough_tools"},
+        {multiuse_item_device_by_leatherman, "multiuse_item_device_by_leatherman"},
+        {charged_device_by_leatherman, "charged_device_by_leatherman"},
+        {charged_device_by_leatherman_delay, "charged_device_by_leatherman_delay"},
+        {dead_device_by_leatherman, "dead_device_by_leatherman"},
+        {degradable_item, "degradable_item"},
+        {item_on_dead_stalker, "item_on_dead_stalker"},
+        {batch_item_on_dead_stalker, "batch_item_on_dead_stalker"},
+        {item_inventory_menu_entries, "item_inventory_menu_entries"},
+        {item_loot_menu_entries, "item_loot_menu_entries"},
+        {outfit_by_leatherman, "outfit_by_leatherman"},
+        {outfit_by_leatherman_delay, "outfit_by_leatherman_delay"},
+        {outfit_by_leatherman_protection, "outfit_by_leatherman_protection"},
+        {outfit_by_grooming, "outfit_by_grooming"},
+        {outfit_by_swiss, "outfit_by_swiss"},
+        {outfit_by_leatherman_with_upgrade, "outfit_by_leatherman_with_upgrade"},
+        {damaged_outfit_by_leatherman, "damaged_outfit_by_leatherman"},
+        {helmet_by_leatherman, "helmet_by_leatherman"},
+        {damaged_helmet_by_leatherman_no_parts, "damaged_helmet_by_leatherman_no_parts"},
+        {damaged_helmet_by_leatherman_no_parts_delay, "damaged_helmet_by_leatherman_no_parts_delay"},
+        {weapon_by_leatherman, "weapon_by_leatherman"},
+        {weapon_by_leatherman_delay, "weapon_by_leatherman_delay"},
+        {weapon_by_leatherman_protection, "weapon_by_leatherman_protection"},
+        {weapon_by_swiss, "weapon_by_swiss"},
+        {weapon_by_grooming, "weapon_by_grooming"},
+        {weapon_no_tool, "weapon_no_tool"},
+        {weapon_with_attachements, "weapon_with_attachements"},
+        {weapon_with_stripped_part, "weapon_with_stripped_part"},
+        {ammo_by_leatherman, "ammo_by_leatherman"},
+        {ammo_by_leatherman_partial_mag, "ammo_by_leatherman_partial_mag"},
+        {ammo_by_leatherman_delay, "ammo_by_leatherman_delay"},
+        {ammo_by_leatherman_protection, "ammo_by_leatherman_protection"},
+        {ammo_by_grooming, "ammo_by_grooming"},
+        {ammo_by_swiss, "ammo_by_swiss"},
+        {ammo_no_tool, "ammo_no_tool"},
+        {ammo_tool_selection, "ammo_tool_selection"},
+        {batch_ammo, "batch_ammo"},
+        {ammo_inventory_menu_entries, "ammo_inventory_menu_entries"},
+        {ammo_loot_menu_entries, "ammo_loot_menu_entries"},
+        {batch_ammo_change_index, "batch_ammo_change_index"},
+        {batch_ammo_partial_mag, "batch_ammo_partial_mag"},
+        {item_by_dragged_leatherman, "item_by_dragged_leatherman"},
+        {item_by_dragged_grooming, "item_by_dragged_grooming"},
+        {item_by_dragged_leatherman_delay, "item_by_dragged_leatherman_delay"},
+        {item_by_dragged_leatherman_protection, "item_by_dragged_leatherman_protection"},
+        {weapon_by_dragged_leatherman, "weapon_by_dragged_leatherman"},
+        {weapon_by_dragged_grooming, "weapon_by_dragged_grooming"},
+        {weapon_by_dragged_swiss, "weapon_by_dragged_swiss"},
+        {ammo_by_dragged_leatherman, "ammo_by_dragged_leatherman"},
+        {disassembly_item_override, "disassembly_item_override"},
+        {disassembly_item_dragged_override, "disassembly_item_dragged_override"},
+    }
+end
+
+function test()
+    
+    local tests = create_tests_batch_1()
+    -- to prevent function at line XXX has more than 60 upvalues adding tests by table.insert
+    table.insert(tests, {disassembly_item_partial_override, "disassembly_item_partial_override"})
+    table.insert(tests, {disassembly_item_dragged_partial_override, "disassembly_item_dragged_partial_override"})
+
+    async_utils.run_async_timer_function(execute_tests, 
+        {
+            default_delay = 0.1,
+            default_ev_id = "tests_event",
+            default_act_id = "tests_action"
+        },
+        tests
+    )
+end
+
+OnSort = ui_inventory.UIInventory.On_Sort
+function ui_inventory.UIInventory:On_Sort(ii, ignore)
+    if ii == 8 and ignore == true then
+        printf("running tests")
+        test()
+    elseif ii == 7 and ignore == true then
+        printf("enumerating items")
+        dump_ruck_content()
+    else
+        OnSort(self, ii, ignore)
+    end
+end

@@ -1,0 +1,53 @@
+
+function run_async_timer_function(func, settings, ...)
+    local coro = coroutine.create(func)
+    local i = 0
+    if not settings then settings = {} end
+    local step_func
+    step_func = function(...)
+        local status, res
+        if i == 0 then
+            status, res = coroutine.resume(coro, ...)
+        else
+            status, res = coroutine.resume(coro)
+        end
+        if status == false then
+            printe("run_async_timer_function: function failure: %s", res)
+        end
+
+        if coroutine.status(coro) == "suspended" then
+            local delay = settings.default_delay
+            local ev_id
+            local act_id
+            if settings.default_ev_id then
+                ev_id = settings.default_ev_id .. i
+            end
+            if settings.default_act_id then
+                act_id = settings.default_act_id .. i
+            end
+            if type(res) == "number" then
+                delay = res
+            elseif type(res) == "table" then
+                if res.delay then delay = res.delay end
+                if res.ev_id then ev_id = res.ev_id end
+                if res.act_id then act_id = res.act_id end
+            end
+            if not delay then printe("run_async_timer_function: delay not specified") end
+            if not ev_id then printe("run_async_timer_function: ev_id not specified") end
+            if not act_id then printe("run_async_timer_function: act_id not specified") end
+            i = i + 1
+            CreateTimeEvent(ev_id, act_id, delay, step_func)
+        end
+        return true
+    end
+    step_func(...)
+end
+
+function yield_to_timer_task(delay, ev_id, act_id)
+    coroutine.yield(
+        {
+            delay = delay, 
+            ev_id = ev_id, 
+            act_id = act_id
+        })
+end
