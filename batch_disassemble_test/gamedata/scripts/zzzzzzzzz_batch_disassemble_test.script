@@ -17,6 +17,12 @@ local ammo_batch_disassembly_property_index = 10
 if gamma and not item_parts.batch_disassembly_supported then
     ammo_batch_disassembly_property_index = 4
 end
+local outfit_disassembly_string
+if item_parts.batch_disassembly_supported then
+    outfit_disassembly_string = "st_dis_text_8_fixed"
+else
+    outfit_disassembly_string = "st_dis_text_8"
+end
 
 local dead_stalker
 
@@ -1260,7 +1266,7 @@ local function outfit_by_leatherman()
     table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
     check_ruck(expected)
     check_tips({
-        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
     check_statistics({"items_disassembled"})
@@ -1291,7 +1297,7 @@ local function outfit_by_leatherman_delay()
     table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
     check_ruck(expected)
     check_tips({
-        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
     check_statistics({"items_disassembled"})
@@ -1330,7 +1336,7 @@ local function outfit_by_leatherman_protection()
     check_ruck(expected)
     check_tips({
         {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
-        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
     check_statistics({"items_disassembled"})
@@ -1352,7 +1358,7 @@ local function outfit_by_leatherman_protection()
     check_ruck(expected)
     check_tips({
         {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"},
-        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"},
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"},
         {msg = "st_awr_ctrl %c[255,51,255,102] %c[255,250,250,250]", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
@@ -1374,7 +1380,7 @@ local function outfit_by_grooming()
     table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
     check_ruck(expected)
     check_tips({
-        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
     check_statistics({"items_disassembled"})
@@ -1395,7 +1401,7 @@ local function outfit_by_swiss()
     table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
     check_ruck(expected)
     check_tips({
-        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
     check_statistics({"items_disassembled"})
@@ -1452,14 +1458,10 @@ local function outfit_by_leatherman_with_upgrade()
     table.insert(expected, {sec = "prt_o_fabrics_1"})
     table.insert(expected, {sec = "prt_o_fabrics_2"})
     table.insert(expected, {sec = "prt_o_fabrics_3"})
-    --if gamma then
-        table.insert(expected, {sec = upgrade_name})
-    --else
-    --    table.insert(expected, {sec = "upgr_o_3_armor"})
-    --end
+    table.insert(expected, {sec = upgrade_name})
     check_ruck(expected)
     check_tips({
-        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2\\n- " .. upgrade_name, icon = "leatherman_tool"}
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2\\n- " .. upgrade_name, icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
     check_statistics({"items_disassembled"})
@@ -1491,7 +1493,7 @@ local function damaged_outfit_by_leatherman()
     table.insert(expected, {sec = "prt_o_fabrics_3", cond = exact_conditions and 0.8 or 0.75})
     check_ruck(expected)
     check_tips({
-        {msg = "st_dis_text_8 %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
     check_statistics({"items_disassembled"})
@@ -1511,7 +1513,7 @@ local function helmet_by_leatherman()
     table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
     check_ruck(expected)
     check_tips({
-        {msg = "st_dis_text_8 %c[255,51,255,102] helm_cloth_mask %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_1\\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] helm_cloth_mask %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_1\\n- prt_o_fabrics_3", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_cloth_fast"})
     check_statistics({"items_disassembled"})

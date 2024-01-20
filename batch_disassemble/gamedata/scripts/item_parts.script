@@ -435,7 +435,7 @@ function process_disassembly_weapon_results_post_animation(results, section, npc
 end
 
 function process_disassembly_outfit_results_post_animation(results, section, npc)
-	process_disassemly_results_post_animation(results, section, npc, "st_dis_text_8", true)
+	process_disassemly_results_post_animation(results, section, npc, "st_dis_text_8_fixed", true)
 end
 
 function process_disassembly_item_results_post_animation(results, section, npc)

@@ -3,4 +3,7 @@
 	<string id="st_batch_breakdown">
 		<text>разобрать всё [!]</text>
 	</string>
+	<string id="st_dis_text_8_fixed">
+		<text>%sВы разрезали %s %s %s %s</text>
+	</string>
 </string_table>

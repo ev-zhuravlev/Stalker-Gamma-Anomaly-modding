@@ -3,4 +3,7 @@
 	<string id="st_batch_breakdown">
 		<text>batch disassemble [!]</text>
 	</string>
+	<string id="st_dis_text_8_fixed">
+		<text>%s%s has been cut %s %s%s </text>
+	</string>
 </string_table>
