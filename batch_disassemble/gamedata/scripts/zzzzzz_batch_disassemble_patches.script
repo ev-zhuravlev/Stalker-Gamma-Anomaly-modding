@@ -1,6 +1,4 @@
-
-
-if (ammo_maker and item_parts.batch_disassembly_supported) then
+if ammo_maker then
     NameCustom = ui_inventory.UIInventory.Name_Custom
     ui_inventory.UIInventory.Name_Custom  = function(self, obj, bag, temp, i)
         obj = self:CheckItem(obj,"Name_Custom " .. i)
@@ -47,5 +45,28 @@ if (ammo_maker and item_parts.batch_disassembly_supported) then
         else
             return ContCustom(self, obj, bag, temp, i)
         end
+    end
+end
+
+if zzzzz_z_experience_patches then
+    DisassemblyWeaponObjectPreExperience = item_parts.disassembly_weapon_object
+    item_parts.disassembly_weapon_object = function(obj, obj_d)
+        local res = DisassemblyWeaponObjectPreExperience(obj, obj_d)
+        experience_actions.GetDisassemblyItemsXP(obj)
+        return res
+    end
+    
+    DisassemblyOutfitObjectPreExperience = item_parts.disassembly_outfit_object
+    item_parts.disassembly_outfit_object = function(obj, obj_d)
+        local res = DisassemblyOutfitObjectPreExperience(obj, obj_d)
+        experience_actions.GetDisassemblyItemsXP(obj)
+        return res
+    end
+    
+    DisassemblyItemObjectPreExperience = item_parts.disassembly_item_object
+    item_parts.disassembly_item_object = function(obj, obj_d)
+        local res = DisassemblyItemObjectPreExperience(obj, obj_d)
+        experience_actions.GetDisassemblyItemsXP(obj)
+        return res
     end
 end
