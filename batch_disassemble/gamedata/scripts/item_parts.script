@@ -546,7 +546,7 @@ function disassembly_wrapper(isBatch, objs, tool)
 		return
 	end
 
-	if #objs == 1 and not isBatch and not IsWeapon(objs[1]) and not IsHeadgear(objs[1]) and not IsWeapon(objs[1]) then
+	if #objs == 1 and not isBatch and IsAmmo(objs[1]) and ammo_maker then
 		disassembly_item(objs[1], tool)
 		return
 	end

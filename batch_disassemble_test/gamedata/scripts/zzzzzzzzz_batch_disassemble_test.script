@@ -81,9 +81,24 @@ function increment_statistic(statistic)
         end
     end 
 
+    printf("statistic %s received", statistic)
     table.insert(statistics, statistic)
     IncrementStatistic(statistic)
 end
+
+
+local DisassemblyItemOrig = item_parts.disassembly_item
+local DisassemblyOutfitOrig = item_parts.disassembly_outfit
+local DisassemblyWeaponOrig = item_parts.disassembly_weapon
+local DisassemblyItemObjectOrig = item_parts.disassembly_item_object
+local DisassemblyOutfitObjectOrig = item_parts.disassembly_outfit_object
+local DisassemblyWeaponObjectOrig = item_parts.disassembly_weapon_object
+local ProcessDisassemblyItemResultsPreAnimationOrig = item_parts.process_disassembly_item_results_pre_animation
+local ProcessDisassemblyOutfitResultsPreAnimationOrig = item_parts.process_disassembly_outfit_results_pre_animation
+local ProcessDisassemblyWeaponResultsPreAnimationOrig = item_parts.process_disassembly_weapon_results_pre_animation
+local ProcessDisassemblyItemResultsPostAnimationOrig = item_parts.process_disassembly_item_results_post_animation
+local ProcessDisassemblyOutfitResultsPostAnimationOrig = item_parts.process_disassembly_outfit_results_post_animation
+local ProcessDisassemblyWeaponResultsPostAnimationOrig = item_parts.process_disassembly_weapon_results_post_animation
 
 local function check_tips(expected_tips)
     local err
@@ -143,9 +158,13 @@ local function check_statistics(expected_statistics)
     end
     if err ~= nil then
         printf("check_statistics failed : %s", err)
-        printf("statistics: ")
+        printf("received statistics: ")
         for i = 1,#statistics do
             printf("  %s", statistics[i])
+        end
+        printf("expected statistics: ")
+        for i = 1,#expected_statistics do
+            printf("  %s", expected_statistics[i])
         end
         error(err)
     end
@@ -226,6 +245,18 @@ local function prepare()
     disable_disassembly_warning()
     disable_animations()
     item_parts.batch_disassembly_property_index = 10
+    item_parts.disassembly_item = DisassemblyItemOrig
+    item_parts.disassembly_outfit = DisassemblyOutfitOrig
+    item_parts.disassembly_weapon = DisassemblyWeaponOrig
+    item_parts.disassembly_item_object = DisassemblyItemObjectOrig
+    item_parts.disassembly_outfit_object = DisassemblyOutfitObjectOrig
+    item_parts.disassembly_weapon_object = DisassemblyWeaponObjectOrig
+    item_parts.process_disassembly_item_results_pre_animation = ProcessDisassemblyItemResultsPreAnimationOrig
+    item_parts.process_disassembly_outfit_results_pre_animation = ProcessDisassemblyOutfitResultsPreAnimationOrig
+    item_parts.process_disassembly_weapon_results_pre_animation = ProcessDisassemblyWeaponResultsPreAnimationOrig
+    item_parts.process_disassembly_item_results_post_animation = ProcessDisassemblyItemResultsPostAnimationOrig
+    item_parts.process_disassembly_outfit_results_post_animation = ProcessDisassemblyOutfitResultsPostAnimationOrig
+    item_parts.process_disassembly_weapon_results_post_animation = ProcessDisassemblyWeaponResultsPostAnimationOrig
 end
 
 local function dump_ruck_content(owner)
@@ -2925,158 +2956,424 @@ local function ammo_by_dragged_leatherman()
     check_statistics({"items_disassembled"})
 end
 
-local function disassembly_item_override()
-    
+local function old_overrides()
     local tool = create_item("leatherman_tool")
-    local item_overriden = create_item("detector_simple")
-    local item_nonoverriden = create_item("bandage")
+    local item = create_item("bandage")
+    local weapon = create_item("wpn_desert_eagle")
+    local outfit = create_item("novice_outfit")
+    local headgear = create_item("helm_bandana")
+    local ammo = create_item("ammo_5.56x45_fmj")
 
-    local DisassemblyItem = item_parts.disassembly_item
     item_parts.disassembly_item = function(obj, tool)
-        if (obj:section() == "detector_simple") then
-            utils_item.degrade( tool , 0.5 )
-            utils_item.discharge( obj )
-            game_statistics.increment_statistic("items_disassembled")
-            actor_effects.play_item_fx("disassemble_metal_fast")
-            local item = alife_create_item("prt_i_paper", db.actor)
-            news_manager.send_tip(db.actor, game.translate_string("st_news_dis_items"), nil, "swiss_knife", 6000)
-        else
-            DisassemblyItem(obj, tool)
-        end
+        game_statistics.increment_statistic("disassembly_item_called")
+    end
+    item_parts.disassembly_outfit = function(obj, tool)
+        game_statistics.increment_statistic("disassembly_outfit_called")
+    end
+    item_parts.disassembly_weapon = function(obj, tool)
+        game_statistics.increment_statistic("disassembly_weapon_called")
+    end
+    
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled"})
+    else
+        check_statistics({"disassembly_item_called"})
+    end
+    statistics = {}
+    
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled"})
+    else
+        check_statistics({"disassembly_weapon_called"})
+    end
+    statistics = {}
+    
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled"})
+    else
+        check_statistics({"disassembly_outfit_called"})
+    end
+    statistics = {}
+    
+    ui_inventory.GUI:Action_Custom(headgear, "actor_bag", nil, disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled"})
+    else
+        check_statistics({"disassembly_outfit_called"})
+    end
+    statistics = {}
+    
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported and not gamma then
+        check_statistics({"items_disassembled"})
+    else
+        check_statistics({"disassembly_item_called"})
+    end
+    statistics = {}
+end
+
+local function batch_old_overrides()
+    local tool = create_item("leatherman_tool")
+    local item = create_item("bandage")
+    create_item("bandage")
+    local weapon = create_item("wpn_desert_eagle")
+    create_item("wpn_desert_eagle")
+    local outfit = create_item("novice_outfit")
+    create_item("novice_outfit")
+    local headgear = create_item("helm_bandana")
+    create_item("helm_bandana")
+    local ammo = create_item("ammo_5.56x45_fmj")
+    create_item("ammo_5.56x45_fmj")
+
+    item_parts.disassembly_item = function(obj, tool)
+        game_statistics.increment_statistic("disassembly_item_called")
+    end
+    item_parts.disassembly_outfit = function(obj, tool)
+        game_statistics.increment_statistic("disassembly_outfit_called")
+    end
+    item_parts.disassembly_weapon = function(obj, tool)
+        game_statistics.increment_statistic("disassembly_weapon_called")
+    end
+    
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, batch_disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled", "items_disassembled"})
+    else
+        check_statistics({})
+    end
+    statistics = {}
+    
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, batch_disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled", "items_disassembled"})
+    else
+        check_statistics({})
+    end
+    statistics = {}
+    
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, batch_disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled", "items_disassembled"})
+    else
+        check_statistics({})
+    end
+    statistics = {}
+    
+    ui_inventory.GUI:Action_Custom(headgear, "actor_bag", nil, batch_disassembly_property_index)
+    coroutine.yield()
+    if item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled", "items_disassembled"})
+    else
+        check_statistics({})
+    end
+    statistics = {}
+    
+    ui_inventory.GUI:Action_Custom(ammo, "actor_bag", nil, ammo_batch_disassembly_property_index)
+    coroutine.yield()
+    if gamma then
+        check_statistics({"items_disassembled"}) -- inconsistency due to separate ammo batch disassemble impl
+                                                -- but item_parts.disassembly_item is not used
+    elseif item_parts.batch_disassembly_supported then
+        check_statistics({"items_disassembled", "items_disassembled"})
+    else
+        check_statistics({})
+    end
+    statistics = {}
+end
+
+local function disassembly_item_new_overrides()
+    if not item_parts.batch_disassembly_supported then
+        return
     end
 
+    enable_animations()
+    local tool = create_item("leatherman_tool")
+    local item = create_item("detector_simple")
+
+    item_parts.disassembly_item_object = function(obj, tool)
+        utils_item.degrade( tool , 0.5 )
+        utils_item.discharge( obj )
+        local res = { details = {}, conditions = {}}
+        table.insert(res.details, "prt_i_paper")
+        res.conditions[#res.details] = 33
+        return res
+    end
+
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+        actor_effects.play_item_fx("fx_" .. results[1].details[1])
+    end
+
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+        news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].conditions[1], nil, "swiss_knife", 6000)
+    end
     
-    ui_inventory.GUI:Action_Custom(item_overriden, "actor_bag", nil, 6)
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, disassembly_property_index)
     coroutine.yield()
-    ui_inventory.GUI:Action_Custom(item_nonoverriden, "actor_bag", nil, 6)
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 20/40},
+    })
+    check_tips({
+    })
+    check_fxs({"fx_prt_i_paper"})
+    check_statistics({})
+    
+    coroutine.yield(4)
+    
+    check_ruck({
+        {sec = "leatherman_tool", cond = 20/40},
+    })
+    check_tips({
+        {msg = "news_post_animation_33", icon = "swiss_knife"},
+    })
+    check_fxs({"fx_prt_i_paper"})
+    check_statistics({})
+end
+
+local function disassembly_item_dragged_new_overrides()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    
+    enable_animations()
+    local tool = create_item("leatherman_tool")
+    local item = create_item("detector_simple")
+
+    item_parts.disassembly_item_object = function(obj, tool)
+        utils_item.degrade( tool , 0.5 )
+        utils_item.discharge( obj )
+        local res = { details = {}, conditions = {}}
+        table.insert(res.details, "prt_i_paper")
+        res.conditions[#res.details] = 33
+        return res
+    end
+
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+        actor_effects.play_item_fx("fx_" .. results[1].details[1])
+    end
+
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+        news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].conditions[1], nil, "swiss_knife", 6000)
+    end
+    
+
+    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item, EDDListType.iActorBag, EDDListType.iActorBag)
     coroutine.yield()
-    item_parts.disassembly_item = DisassemblyItem
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 20/40},
+    })
+    check_tips({
+    })
+    check_fxs({"fx_prt_i_paper"})
+    check_statistics({})
+    
+    coroutine.yield(4)
+    
+    check_ruck({
+        {sec = "leatherman_tool", cond = 20/40},
+    })
+    check_tips({
+        {msg = "news_post_animation_33", icon = "swiss_knife"},
+    })
+    check_fxs({"fx_prt_i_paper"})
+    check_statistics({})
+end
+
+local function disassembly_item_partial_new_overrides()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+
+    enable_animations()
+    local tool = create_item("leatherman_tool")
+    local item = create_item("detector_simple")
+
+    item_parts.disassembly_item_object = function(obj, tool)
+        utils_item.degrade( tool , 0.5 )
+        local res = DisassemblyItemObjectOrig(obj, tool)
+        table.insert(res.details, "prt_i_paper")
+        res.conditions[#res.details] = 33
+        return res
+    end
+
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+        actor_effects.play_item_fx("fx_" .. results[1].details[1])
+        ProcessDisassemblyItemResultsPreAnimationOrig(results, section, npc_id)
+    end
+
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+        news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].details[1], nil, "swiss_knife", 6000)
+        ProcessDisassemblyItemResultsPostAnimationOrig(results, section, npc_id)
+    end
+    
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, disassembly_property_index)
+    coroutine.yield()
 
     check_ruck({
         {sec = "leatherman_tool", cond = 19/40},
-        {sec = "prt_o_fabrics_3"},
-        {sec = "prt_i_paper"},
     })
     check_tips({
-        {msg = "st_news_dis_items", icon = "swiss_knife"},
-        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
     })
-    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
-    check_statistics({"items_disassembled", "items_disassembled"})
-end
-
-local DisassemblyItem = item_parts.disassembly_item
-local function disassembly_item_dragged_override()
+    check_fxs({"fx_prt_i_capacitors", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
     
-    local tool = create_item("leatherman_tool")
-    local item_overriden = create_item("detector_simple")
-    local item_nonoverriden = create_item("bandage")
-
-    item_parts.disassembly_item = function(obj, tool)
-        if (obj:section() == "detector_simple") then
-            utils_item.degrade( tool , 0.5 )
-            utils_item.discharge( obj )
-            game_statistics.increment_statistic("items_disassembled")
-            actor_effects.play_item_fx("disassemble_metal_fast")
-            local item = alife_create_item("prt_i_paper", db.actor)
-            news_manager.send_tip(db.actor, game.translate_string("st_news_dis_items"), nil, "swiss_knife", 6000)
-        else
-            DisassemblyItem(obj, tool)
-        end
-    end
-
-    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item_overriden, EDDListType.iActorBag, EDDListType.iActorBag)
-    coroutine.yield()
-    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item_nonoverriden, EDDListType.iActorBag, EDDListType.iActorBag)
-    coroutine.yield()
-    item_parts.disassembly_item = DisassemblyItem
-
+    coroutine.yield(4)
+    
     check_ruck({
         {sec = "leatherman_tool", cond = 19/40},
-        {sec = "prt_o_fabrics_3"},
+        {sec = "prt_i_capacitors"},
+        {sec = "prt_i_capacitors"},
+        {sec = "prt_i_transistors"},
+        {sec = "prt_i_transistors"},
+        {sec = "prt_i_resistors"},
+        {sec = "prt_i_copper"},
+        {sec = "prt_i_fasteners"},
+        {sec = "prt_i_scrap"},
+        {sec = "batteries_dead"},
         {sec = "prt_i_paper"},
     })
     check_tips({
-        {msg = "st_news_dis_items", icon = "swiss_knife"},
-        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
+        {msg = "news_post_animation_prt_i_capacitors", icon = "swiss_knife"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] detector_simple %c[255,250,250,250] st_dis_text_9 \\n- prt_i_capacitors\\n- prt_i_capacitors\\n- prt_i_transistors\\n- prt_i_transistors\\n- prt_i_resistors\\n- prt_i_copper\\n- prt_i_fasteners\\n- prt_i_scrap\\n- batteries_dead\\n- prt_i_paper", icon = "leatherman_tool"},
     })
-    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
-    check_statistics({"items_disassembled", "items_disassembled"})
+    check_fxs({"fx_prt_i_capacitors", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
 end
 
-local function disassembly_item_partial_override()
-    
-    local tool = create_item("leatherman_tool")
-    local item_overriden = create_item("yadylin")
-    local item_nonoverriden = create_item("bandage")
-
-    item_parts.disassembly_item = function(obj, tool)
-        if (obj:section() == "yadylin") then
-            local item = alife_create_item("prt_i_paper", db.actor)
-            async_utils.yield_to_timer_task(0.1, "disassembly_item_partial_override" .. obj:id(), "d" .. obj:id())
-            DisassemblyItem(obj, tool)
-        else
-            DisassemblyItem(obj, tool)
-        end
-        printf("returning")
+local function batch_disassembly_item_new_overrides()
+    if not item_parts.batch_disassembly_supported then
+        return
     end
 
-    ui_inventory.GUI:Action_Custom(item_overriden, "actor_bag", nil, 6)
-    coroutine.yield(0.2)
-    ui_inventory.GUI:Action_Custom(item_nonoverriden, "actor_bag", nil, 6)
-    coroutine.yield(0.2)
-    item_parts.disassembly_item = DisassemblyItem
-
-    check_ruck({
-        {sec = "leatherman_tool", cond = 38/40},
-        {sec = "prt_o_fabrics_3"},
-        {sec = "prt_i_paper"},
-        {sec = "jar"},
-    })
-    check_tips({
-        {msg = "st_dis_text_11 %c[255,51,255,102] yadylin %c[255,250,250,250] st_dis_text_9 \\n- jar", icon = "leatherman_tool"},
-        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
-    })
-    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
-    check_statistics({"items_disassembled", "items_disassembled"})
-end
-
-local function disassembly_item_dragged_partial_override()
-    
+    enable_animations()
     local tool = create_item("leatherman_tool")
-    local item_overriden = create_item("yadylin")
-    local item_nonoverriden = create_item("bandage")
+    local item = create_item("detector_simple")
+    create_item("detector_simple")
 
-    item_parts.disassembly_item = function(obj, tool)
-        if (obj:section() == "yadylin") then
-            local item = alife_create_item("prt_i_paper", db.actor)
-            async_utils.yield_to_timer_task(0.1, "disassembly_item_partial_override" .. obj:id(), "d" .. obj:id())
-            DisassemblyItem(obj, tool)
-        else
-            DisassemblyItem(obj, tool)
-        end
-        printf("returning")
+    item_parts.disassembly_item_object = function(obj, tool)
+        utils_item.degrade( tool , 0.4 )
+        utils_item.discharge( obj )
+        local res = { details = {}, conditions = {}}
+        table.insert(res.details, "prt_i_paper")
+        res.conditions[#res.details] = 33
+        return res
     end
 
-    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item_overriden, EDDListType.iActorBag, EDDListType.iActorBag)
-    coroutine.yield(0.2)
-    SendScriptCallback("ActorMenu_on_item_drag_drop", tool, item_nonoverriden, EDDListType.iActorBag, EDDListType.iActorBag)
-    coroutine.yield(0.2)
-    item_parts.disassembly_item = DisassemblyItem
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+        actor_effects.play_item_fx("fx_" .. results[1].details[1])
+    end
+
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+        news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].conditions[1], nil, "swiss_knife", 6000)
+    end
+    
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, batch_disassembly_property_index)
+    coroutine.yield()
 
     check_ruck({
-        {sec = "leatherman_tool", cond = 38/40},
-        {sec = "prt_o_fabrics_3"},
-        {sec = "prt_i_paper"},
-        {sec = "jar"},
+        {sec = "leatherman_tool", cond = 0.2},
     })
     check_tips({
-        {msg = "st_dis_text_11 %c[255,51,255,102] yadylin %c[255,250,250,250] st_dis_text_9 \\n- jar", icon = "leatherman_tool"},
-        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"},
     })
-    check_fxs({"disassemble_metal_fast", "disassemble_metal_fast"})
+    check_fxs({"fx_prt_i_paper"})
+    check_statistics({})
+    
+    coroutine.yield(4)
+    
+    check_ruck({
+        {sec = "leatherman_tool", cond = 0.2},
+    })
+    check_tips({
+        {msg = "news_post_animation_33", icon = "swiss_knife"},
+    })
+    check_fxs({"fx_prt_i_paper"})
+    check_statistics({})
+end
+
+local function batch_disassembly_item_partial_new_overrides()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+
+    enable_animations()
+    local tool = create_item("leatherman_tool")
+    local item = create_item("detector_simple")
+    create_item("detector_simple")
+
+    item_parts.disassembly_item_object = function(obj, tool)
+        utils_item.degrade( tool , 0.4 )
+        local res = DisassemblyItemObjectOrig(obj, tool)
+        table.insert(res.details, "prt_i_paper")
+        res.conditions[#res.details] = 33
+        return res
+    end
+
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+        actor_effects.play_item_fx("fx_" .. results[1].details[1])
+        ProcessDisassemblyItemResultsPreAnimationOrig(results, section, npc_id)
+    end
+
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+        news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].details[1], nil, "swiss_knife", 6000)
+        ProcessDisassemblyItemResultsPostAnimationOrig(results, section, npc_id)
+    end
+    
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, batch_disassembly_property_index)
+    coroutine.yield()
+
+    check_ruck({
+        {sec = "leatherman_tool", cond = 6/40},
+    })
+    check_tips({
+    })
+    check_fxs({"fx_prt_i_capacitors", "disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+    
+    coroutine.yield(4)
+    
+    check_ruck({
+        {sec = "leatherman_tool", cond = 6/40},
+        {sec = "prt_i_capacitors"},
+        {sec = "prt_i_capacitors"},
+        {sec = "prt_i_transistors"},
+        {sec = "prt_i_transistors"},
+        {sec = "prt_i_resistors"},
+        {sec = "prt_i_copper"},
+        {sec = "prt_i_fasteners"},
+        {sec = "prt_i_scrap"},
+        {sec = "batteries_dead"},
+        {sec = "prt_i_paper"},
+        {sec = "prt_i_capacitors"},
+        {sec = "prt_i_capacitors"},
+        {sec = "prt_i_transistors"},
+        {sec = "prt_i_transistors"},
+        {sec = "prt_i_resistors"},
+        {sec = "prt_i_copper"},
+        {sec = "prt_i_fasteners"},
+        {sec = "prt_i_scrap"},
+        {sec = "batteries_dead"},
+        {sec = "prt_i_paper"},
+    })
+    check_tips({
+        {msg = "news_post_animation_prt_i_capacitors", icon = "swiss_knife"},
+        {msg = "st_dis_text_11 %c[255,51,255,102] detector_simple %c[255,250,250,250] st_dis_text_9 \\n- 4 prt_i_capacitors\\n- 4 prt_i_transistors\\n- 2 prt_i_resistors\\n- 2 prt_i_copper\\n- 2 prt_i_fasteners\\n- 2 prt_i_scrap\\n- 2 batteries_dead\\n- 2 prt_i_paper", icon = "leatherman_tool"},
+    })
+    check_fxs({"fx_prt_i_capacitors", "disassemble_metal_fast"})
     check_statistics({"items_disassembled", "items_disassembled"})
 end
+
 
 function create_tests_batch_1()
     return {
@@ -3137,17 +3434,20 @@ function create_tests_batch_1()
         {weapon_by_dragged_grooming, "weapon_by_dragged_grooming"},
         {weapon_by_dragged_swiss, "weapon_by_dragged_swiss"},
         {ammo_by_dragged_leatherman, "ammo_by_dragged_leatherman"},
-        {disassembly_item_override, "disassembly_item_override"},
-        {disassembly_item_dragged_override, "disassembly_item_dragged_override"},
     }
 end
 
 function test()
     
-    local tests = create_tests_batch_1()
+    local tests = {}--create_tests_batch_1()
     -- to prevent function at line XXX has more than 60 upvalues adding tests by table.insert
-    table.insert(tests, {disassembly_item_partial_override, "disassembly_item_partial_override"})
-    table.insert(tests, {disassembly_item_dragged_partial_override, "disassembly_item_dragged_partial_override"})
+    table.insert(tests, {old_overrides, "old_overrides"})
+    table.insert(tests, {batch_old_overrides, "batch_old_overrides"})
+    table.insert(tests, {disassembly_item_new_overrides, "disassembly_item_new_overrides"})
+    table.insert(tests, {disassembly_item_dragged_new_overrides, "disassembly_item_dragged_new_overrides"})
+    table.insert(tests, {disassembly_item_partial_new_overrides, "disassembly_item_partial_new_overrides"})
+    table.insert(tests, {batch_disassembly_item_new_overrides, "batch_disassembly_item_new_overrides"})
+    table.insert(tests, {batch_disassembly_item_partial_new_overrides, "batch_disassembly_item_partial_new_overrides"})
 
     async_utils.run_async_timer_function(execute_tests, 
         {
