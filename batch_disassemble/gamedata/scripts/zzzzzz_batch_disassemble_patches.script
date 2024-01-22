@@ -50,22 +50,22 @@ end
 
 if zzzzz_z_experience_patches then
     DisassemblyWeaponObjectPreExperience = item_parts.disassembly_weapon_object
-    item_parts.disassembly_weapon_object = function(obj, obj_d)
-        local res = DisassemblyWeaponObjectPreExperience(obj, obj_d)
+    item_parts.disassembly_weapon_object = function(obj, obj_d, is_batch)
+        local res = DisassemblyWeaponObjectPreExperience(obj, obj_d, is_batch)
         experience_actions.GetDisassemblyItemsXP(obj)
         return res
     end
     
     DisassemblyOutfitObjectPreExperience = item_parts.disassembly_outfit_object
-    item_parts.disassembly_outfit_object = function(obj, obj_d)
-        local res = DisassemblyOutfitObjectPreExperience(obj, obj_d)
+    item_parts.disassembly_outfit_object = function(obj, obj_d, is_batch)
+        local res = DisassemblyOutfitObjectPreExperience(obj, obj_d, is_batch)
         experience_actions.GetDisassemblyItemsXP(obj)
         return res
     end
     
     DisassemblyItemObjectPreExperience = item_parts.disassembly_item_object
-    item_parts.disassembly_item_object = function(obj, obj_d)
-        local res = DisassemblyItemObjectPreExperience(obj, obj_d)
+    item_parts.disassembly_item_object = function(obj, obj_d, is_batch)
+        local res = DisassemblyItemObjectPreExperience(obj, obj_d, is_batch)
         experience_actions.GetDisassemblyItemsXP(obj)
         return res
     end

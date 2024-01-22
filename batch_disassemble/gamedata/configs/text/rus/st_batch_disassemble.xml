@@ -6,4 +6,7 @@
 	<string id="st_dis_text_8_fixed">
 		<text>%sВы разрезали %s %s %s %s</text>
 	</string>
+	<string id="st_dis_text_batch_no_items_threshold">
+		<text>%sДля разборки нет предметов подходящего качества</text>
+	</string>
 </string_table>

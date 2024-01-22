@@ -6,4 +6,7 @@
 	<string id="st_dis_text_8_fixed">
 		<text>%s%s has been cut %s %s%s </text>
 	</string>
+	<string id="st_dis_text_batch_no_items_threshold">
+		<text>%sNo items with suitable condition to disassemble</text>
+	</string>
 </string_table>

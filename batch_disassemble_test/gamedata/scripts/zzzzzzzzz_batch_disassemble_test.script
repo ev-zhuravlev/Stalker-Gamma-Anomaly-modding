@@ -245,6 +245,8 @@ local function prepare()
     disable_disassembly_warning()
     disable_animations()
     item_parts.batch_disassembly_property_index = 10
+    item_parts.batch_disassembly_weapon_condition_threshold = 100
+    item_parts.batch_disassembly_outfit_condition_threshold = 100
     item_parts.disassembly_item = DisassemblyItemOrig
     item_parts.disassembly_outfit = DisassemblyOutfitOrig
     item_parts.disassembly_weapon = DisassemblyWeaponOrig
@@ -748,7 +750,7 @@ local function batch_not_enough_tools()
     table.insert(expected, {sec = "prt_o_fabrics_3", cond = {0.5, 0.75}})
     check_ruck(expected)
     check_tips({
-        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3", icon = "leatherman_tool"}
+        {msg = "st_dis_text_11 %c[255,51,255,102] bandage %c[255,250,250,250] st_dis_text_9 \\n- 1 prt_o_fabrics_3", icon = "leatherman_tool"}
     })
     check_fxs({"disassemble_metal_fast"})
     check_statistics({"items_disassembled"})
@@ -3101,7 +3103,7 @@ local function disassembly_item_new_overrides()
     local tool = create_item("leatherman_tool")
     local item = create_item("detector_simple")
 
-    item_parts.disassembly_item_object = function(obj, tool)
+    item_parts.disassembly_item_object = function(obj, tool, is_batch)
         utils_item.degrade( tool , 0.5 )
         utils_item.discharge( obj )
         local res = { details = {}, conditions = {}}
@@ -3110,11 +3112,11 @@ local function disassembly_item_new_overrides()
         return res
     end
 
-    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id, is_batch)
         actor_effects.play_item_fx("fx_" .. results[1].details[1])
     end
 
-    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id, is_batch)
         news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].conditions[1], nil, "swiss_knife", 6000)
     end
     
@@ -3150,7 +3152,7 @@ local function disassembly_item_dragged_new_overrides()
     local tool = create_item("leatherman_tool")
     local item = create_item("detector_simple")
 
-    item_parts.disassembly_item_object = function(obj, tool)
+    item_parts.disassembly_item_object = function(obj, tool, is_batch)
         utils_item.degrade( tool , 0.5 )
         utils_item.discharge( obj )
         local res = { details = {}, conditions = {}}
@@ -3159,11 +3161,11 @@ local function disassembly_item_dragged_new_overrides()
         return res
     end
 
-    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id, is_batch)
         actor_effects.play_item_fx("fx_" .. results[1].details[1])
     end
 
-    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id, is_batch)
         news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].conditions[1], nil, "swiss_knife", 6000)
     end
     
@@ -3200,22 +3202,22 @@ local function disassembly_item_partial_new_overrides()
     local tool = create_item("leatherman_tool")
     local item = create_item("detector_simple")
 
-    item_parts.disassembly_item_object = function(obj, tool)
+    item_parts.disassembly_item_object = function(obj, tool, is_batch)
         utils_item.degrade( tool , 0.5 )
-        local res = DisassemblyItemObjectOrig(obj, tool)
+        local res = DisassemblyItemObjectOrig(obj, tool, is_batch)
         table.insert(res.details, "prt_i_paper")
         res.conditions[#res.details] = 33
         return res
     end
 
-    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id, is_batch)
         actor_effects.play_item_fx("fx_" .. results[1].details[1])
-        ProcessDisassemblyItemResultsPreAnimationOrig(results, section, npc_id)
+        ProcessDisassemblyItemResultsPreAnimationOrig(results, section, npc_id, is_batch)
     end
 
-    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id, is_batch)
         news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].details[1], nil, "swiss_knife", 6000)
-        ProcessDisassemblyItemResultsPostAnimationOrig(results, section, npc_id)
+        ProcessDisassemblyItemResultsPostAnimationOrig(results, section, npc_id, is_batch)
     end
     
     ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, disassembly_property_index)
@@ -3262,7 +3264,7 @@ local function batch_disassembly_item_new_overrides()
     local item = create_item("detector_simple")
     create_item("detector_simple")
 
-    item_parts.disassembly_item_object = function(obj, tool)
+    item_parts.disassembly_item_object = function(obj, tool, is_batch)
         utils_item.degrade( tool , 0.4 )
         utils_item.discharge( obj )
         local res = { details = {}, conditions = {}}
@@ -3271,11 +3273,11 @@ local function batch_disassembly_item_new_overrides()
         return res
     end
 
-    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id, is_batch)
         actor_effects.play_item_fx("fx_" .. results[1].details[1])
     end
 
-    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id, is_batch)
         news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].conditions[1], nil, "swiss_knife", 6000)
     end
     
@@ -3312,22 +3314,22 @@ local function batch_disassembly_item_partial_new_overrides()
     local item = create_item("detector_simple")
     create_item("detector_simple")
 
-    item_parts.disassembly_item_object = function(obj, tool)
+    item_parts.disassembly_item_object = function(obj, tool, is_batch)
         utils_item.degrade( tool , 0.4 )
-        local res = DisassemblyItemObjectOrig(obj, tool)
+        local res = DisassemblyItemObjectOrig(obj, tool, is_batch)
         table.insert(res.details, "prt_i_paper")
         res.conditions[#res.details] = 33
         return res
     end
 
-    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_pre_animation = function(results, section, npc_id, is_batch)
         actor_effects.play_item_fx("fx_" .. results[1].details[1])
-        ProcessDisassemblyItemResultsPreAnimationOrig(results, section, npc_id)
+        ProcessDisassemblyItemResultsPreAnimationOrig(results, section, npc_id, is_batch)
     end
 
-    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id)
+    item_parts.process_disassembly_item_results_post_animation = function(results, section, npc_id, is_batch)
         news_manager.send_tip(db.actor, "news_post_animation_" .. results[1].details[1], nil, "swiss_knife", 6000)
-        ProcessDisassemblyItemResultsPostAnimationOrig(results, section, npc_id)
+        ProcessDisassemblyItemResultsPostAnimationOrig(results, section, npc_id, is_batch)
     end
     
     ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, batch_disassembly_property_index)
@@ -3374,6 +3376,144 @@ local function batch_disassembly_item_partial_new_overrides()
     check_statistics({"items_disassembled", "items_disassembled"})
 end
 
+local function batch_outfit_threshold_all()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    create_item("leatherman_tool")    
+    local outfit = create_item("novice_outfit", 1)
+    outfit = create_item("novice_outfit", 0.6)
+
+    math.randomseed(458)
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 38/40})
+    table.insert(expected, {sec = "prt_o_fabrics_1", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_2", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_3", cond = new_outfit_parts_condition})
+    table.insert(expected, {sec = "prt_o_fabrics_1"})
+    table.insert(expected, {sec = "prt_o_fabrics_2"})
+    table.insert(expected, {sec = "prt_o_fabrics_3"})
+    check_ruck(expected)
+    check_tips({
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- 2 prt_o_fabrics_3\\n- 2 prt_o_fabrics_1\\n- 2 prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+local function batch_outfit_threshold_partial()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    item_parts.batch_disassembly_outfit_condition_threshold = 80
+
+    create_item("leatherman_tool")    
+    local outfit = create_item("novice_outfit", 1)
+    outfit = create_item("novice_outfit", 0.6)
+
+    math.randomseed(458)
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "novice_outfit", cond = 1})
+    table.insert(expected, {sec = "prt_o_fabrics_1"})
+    table.insert(expected, {sec = "prt_o_fabrics_2"})
+    table.insert(expected, {sec = "prt_o_fabrics_3"})
+    check_ruck(expected)
+    check_tips({
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- 1 prt_o_fabrics_3\\n- 1 prt_o_fabrics_1\\n- 1 prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function batch_outfit_threshold_none()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    item_parts.batch_disassembly_outfit_condition_threshold = 30
+
+    create_item("leatherman_tool")    
+    local outfit = create_item("novice_outfit", 1)
+    outfit = create_item("novice_outfit", 0.4)
+
+    math.randomseed(458)
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "novice_outfit", cond = 1})
+    table.insert(expected, {sec = "novice_outfit", cond = 0.4})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_batch_no_items_threshold %c[255,204,0,51]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function non_batch_outfit_no_threshold_effect()
+    item_parts.batch_disassembly_outfit_condition_threshold = 80
+
+    create_item("leatherman_tool")    
+    local outfit = create_item("novice_outfit", 1)
+
+    math.randomseed(458)
+    ui_inventory.GUI:Action_Custom(outfit, "actor_bag", nil, disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_fabrics_1"})
+    table.insert(expected, {sec = "prt_o_fabrics_2"})
+    table.insert(expected, {sec = "prt_o_fabrics_3"})
+    check_ruck(expected)
+    check_tips({
+        {msg = outfit_disassembly_string .. " %c[255,51,255,102] novice_outfit %c[255,250,250,250] st_dis_text_9 \\n- prt_o_fabrics_3\\n- prt_o_fabrics_1\\n- prt_o_fabrics_2", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_cloth_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function batch_weapon_threshold_partial()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    item_parts.batch_disassembly_weapon_condition_threshold = 80
+
+    create_item("leatherman_tool")    
+    local weapon = create_item("wpn_desert_eagle", 1)
+    weapon = create_item("wpn_desert_eagle", 0.6)
+
+    math.randomseed(458)
+    ui_inventory.GUI:Action_Custom(weapon, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "wpn_desert_eagle", cond = 1})
+    table.insert(expected, {sec = "prt_w_p_barrel_7"})
+    table.insert(expected, {sec = "prt_w_p_spring_6"})
+    table.insert(expected, {sec = "prt_w_p_trigger_1"})
+    table.insert(expected, {sec = "ammo_357_hp_mag", ammo = 9})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_7 %c[255,51,255,102] wpn_desert_eagle %c[255,250,250,250] st_dis_text_9 \\n- 1 prt_w_p_barrel_7\\n- 1 prt_w_p_spring_6\\n- 1 prt_w_p_trigger_1", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
 
 function create_tests_batch_1()
     return {
@@ -3439,7 +3579,7 @@ end
 
 function test()
     
-    local tests = {}--create_tests_batch_1()
+    local tests = create_tests_batch_1()
     -- to prevent function at line XXX has more than 60 upvalues adding tests by table.insert
     table.insert(tests, {old_overrides, "old_overrides"})
     table.insert(tests, {batch_old_overrides, "batch_old_overrides"})
@@ -3448,6 +3588,11 @@ function test()
     table.insert(tests, {disassembly_item_partial_new_overrides, "disassembly_item_partial_new_overrides"})
     table.insert(tests, {batch_disassembly_item_new_overrides, "batch_disassembly_item_new_overrides"})
     table.insert(tests, {batch_disassembly_item_partial_new_overrides, "batch_disassembly_item_partial_new_overrides"})
+    table.insert(tests, {batch_outfit_threshold_all, "batch_outfit_threshold_all"})
+    table.insert(tests, {batch_outfit_threshold_partial, "batch_outfit_threshold_partial"})
+    table.insert(tests, {batch_outfit_threshold_none, "batch_outfit_threshold_none"})
+    table.insert(tests, {non_batch_outfit_no_threshold_effect, "non_batch_outfit_no_threshold_effect"})
+    table.insert(tests, {batch_weapon_threshold_partial, "batch_weapon_threshold_partial"})
 
     async_utils.run_async_timer_function(execute_tests, 
         {
