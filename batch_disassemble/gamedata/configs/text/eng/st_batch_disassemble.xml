@@ -9,4 +9,43 @@
 	<string id="st_dis_text_batch_no_items_threshold">
 		<text>%sNo items with suitable condition to disassemble</text>
 	</string>
+	<string id="ui_mcm_disassembly_title">
+		<text>Items Disassembly</text>
+	</string>
+	<string id="ui_mcm_batch_disassembly_title">
+		<text>Batch Disassembly</text>
+	</string>
+	<string id="ui_mcm_menu_items_batch_disassembly">
+		<text>Batch Disassembly</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_enabled">
+		<text>Enable batch disassembly</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_enabled_desc">
+		<text>Enable "batch disassemble" inventory context menu to disassemble entire items stack in one go.</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_always_shown">
+		<text>Enable batch disassembly for singular items</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_always_shown_desc">
+		<text>Singular items will not hide "batch disassemble" context menu.</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_item_condition_threshold">
+		<text>Do not disassemble items with condition higher than</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_item_condition_threshold_desc">
+		<text>"batch disassemble" will not disassemble items (everything except weapons and armor) with condition higher than specified.</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_weapon_condition_threshold">
+		<text>Do not disassemble weapons with condition higher than</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_weapon_condition_threshold_desc">
+		<text>"batch disassemble" will not disassemble weapons with condition higher than specified.</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_outfit_condition_threshold">
+		<text>Do not disassemble armor with condition higher than</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_outfit_condition_threshold_desc">
+		<text>"batch disassemble" will not disassemble armor with condition higher than specified.</text>
+	</string>
 </string_table>

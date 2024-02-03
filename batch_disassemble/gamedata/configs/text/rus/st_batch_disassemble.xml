@@ -9,4 +9,40 @@
 	<string id="st_dis_text_batch_no_items_threshold">
 		<text>%sДля разборки нет предметов подходящего качества</text>
 	</string>
+	<string id="ui_mcm_batch_disassembly_title">
+		<text>Массовая разборка</text>
+	</string>
+	<string id="ui_mcm_menu_items_batch_disassembly">
+		<text>Массовая разборка</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_enabled">
+		<text>Включить массовую разборку</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_enabled_desc">
+		<text>В контекстное меню предметов в инвентаре будет добавлен пункт "Разобрать всё", позволяющий разобрать весь стек предметов сразу.</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_always_shown">
+		<text>Включить массовую разборку для единичных предметов</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_always_shown_desc">
+		<text>Для предметов в единичном количестве пункт меню "Разобрать всё" не будет скрыт.</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_item_condition_threshold">
+		<text>Не разбирать предметы состоянием выше чем</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_item_condition_threshold_desc">
+		<text>"Разобрать всё" не будет разбирать предметы (не оружие и не броню) состоянием выше чем указано.</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_weapon_condition_threshold">
+		<text>Не разбирать оружие состоянием выше чем</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_weapon_condition_threshold_desc">
+		<text>"Разобрать всё" не будет разбирать оружие состоянием выше чем указано.</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_outfit_condition_threshold">
+		<text>Не разбирать броню состоянием выше чем</text>
+	</string>
+	<string id="ui_mcm_items_batch_disassembly_batch_disassembly_outfit_condition_threshold_desc">
+		<text>"Разобрать всё" не будет разбирать броню состоянием выше чем указано.</text>
+	</string>
 </string_table>
