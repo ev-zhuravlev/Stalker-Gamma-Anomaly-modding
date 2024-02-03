@@ -40,6 +40,7 @@ batch_disassembly_supported_containers = nil
 batch_disassembly_supported_modes = nil
 batch_disassembly_weapon_condition_threshold = nil
 batch_disassembly_outfit_condition_threshold = nil
+batch_disassembly_item_condition_threshold = nil
 
 
 function init_settings()
@@ -58,6 +59,7 @@ function init_settings()
 	batch_disassembly_supported_modes = ini_parts:r_string_ex("settings", "batch_disassembly_supported_modes") or "inventory, loot"
 	batch_disassembly_weapon_condition_threshold = ini_parts:r_float_ex("settings", "batch_disassembly_weapon_condition_threshold") or 100
 	batch_disassembly_outfit_condition_threshold = ini_parts:r_float_ex("settings", "batch_disassembly_outfit_condition_threshold") or 100
+	batch_disassembly_item_condition_threshold = ini_parts:r_float_ex("settings", "batch_disassembly_item_condition_threshold") or 100
 end
 
 ----------------------------------------------------------------------
@@ -175,16 +177,19 @@ function batch_disassembly_threshold_prefilter(objs, threshold)
 	return filtered_objs
 end
 
-function batch_disassembly_item_prefilter(objs)
-	return objs
-end
-
 function batch_disassembly_weapon_prefilter(objs)
 	return batch_disassembly_threshold_prefilter(objs, batch_disassembly_weapon_condition_threshold)
 end
 
 function batch_disassembly_outfit_prefilter(objs)
 	return batch_disassembly_threshold_prefilter(objs, batch_disassembly_outfit_condition_threshold)
+end
+
+function batch_disassembly_item_prefilter(objs)
+	if (is_uses_battaries(objs[1])) then
+		return objs
+	end
+	return batch_disassembly_threshold_prefilter(objs, batch_disassembly_item_condition_threshold)
 end
 
 function disassembly_item_object(obj, obj_d, is_batch)
@@ -233,7 +238,7 @@ function disassembly_item_object(obj, obj_d, is_batch)
 		end
 	end
 	
-	if IsItem("device", sec) and item_device.device_battery and item_device.is_device_charged(nil, sec, con) then
+	if is_uses_battaries(nil, sec) and item_device.is_device_charged(nil, sec, con) then
 		table.insert(result.details, item_device.device_battery)
 		result.conditions[#result.details] = con * 100
 	end
@@ -470,8 +475,8 @@ function process_disassembly_item_results_post_animation(results, section, npc, 
 	process_disassemly_results_post_animation(results, section, npc, "st_dis_text_11", false, is_batch)
 end
 
-function is_disassemblable(obj)
-	local sec = obj:section()
+function is_disassemblable(obj, section)
+	local sec = obj and obj:section() or section
 	sec = ini_sys:r_string_ex(sec,"parent_section") or sec -- for weapons with scopes
 
 	if not (ini_parts:r_string_ex("nor_parts_list",sec)
@@ -493,8 +498,13 @@ function is_disassemblable(obj)
 	return true
 end
 
-function is_batch_disassemblable(obj)
-	return is_disassemblable(obj)
+function is_batch_disassemblable(obj, section)
+	return is_disassemblable(obj, section)
+end
+
+function is_uses_battaries(obj, section)
+	local sec = obj and obj:section() or section
+	return not not IsItem("device", sec) and item_device.device_battery and item_device.dev_consumption[sec]
 end
 
 function disassembly_impl(is_batch, objs, tool)

@@ -247,6 +247,7 @@ local function prepare()
     item_parts.batch_disassembly_property_index = 10
     item_parts.batch_disassembly_weapon_condition_threshold = 100
     item_parts.batch_disassembly_outfit_condition_threshold = 100
+    item_parts.batch_disassembly_item_condition_threshold = 100
     item_parts.disassembly_item = DisassemblyItemOrig
     item_parts.disassembly_outfit = DisassemblyOutfitOrig
     item_parts.disassembly_weapon = DisassemblyWeaponOrig
@@ -3515,6 +3516,134 @@ local function batch_weapon_threshold_partial()
     check_statistics({"items_disassembled"})
 end
 
+local function batch_item_threshold_all()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    create_item("leatherman_tool")
+    local item = create_item("prt_o_support_1", 1)
+    create_item("prt_o_support_1", 0.6)
+
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 38/40})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] prt_o_support_1 %c[255,250,250,250] st_dis_text_9 \\n- 4 prt_i_scrap\\n- 4 prt_i_fasteners", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+local function batch_item_threshold_partial()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    item_parts.batch_disassembly_item_condition_threshold = 80
+
+    create_item("leatherman_tool")
+    local item = create_item("prt_o_support_1", 1)
+    create_item("prt_o_support_1", 0.6)
+
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 39/40})
+    table.insert(expected, {sec = "prt_o_support_1", cond = 1})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "prt_i_scrap"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] prt_o_support_1 %c[255,250,250,250] st_dis_text_9 \\n- 2 prt_i_scrap\\n- 2 prt_i_fasteners", icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled"})
+end
+
+local function batch_item_threshold_none()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    item_parts.batch_disassembly_item_condition_threshold = 30
+
+    create_item("leatherman_tool")
+    local item = create_item("prt_o_support_1", 1)
+    create_item("prt_o_support_1", 0.4)
+
+    ui_inventory.GUI:Action_Custom(item, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 1})
+    table.insert(expected, {sec = "prt_o_support_1", cond = 1})
+    table.insert(expected, {sec = "prt_o_support_1", cond = 0.4})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_batch_no_items_threshold %c[255,204,0,51]", icon = "leatherman_tool"}
+    })
+    check_fxs({})
+    check_statistics({})
+end
+
+local function batch_item_with_battaries_threshold()
+    if not item_parts.batch_disassembly_supported then
+        return
+    end
+    item_parts.batch_disassembly_item_condition_threshold = 60
+
+    create_item("leatherman_tool")
+    local device = create_item("device_pda_1", 1)
+    create_item("device_pda_1", 0.4)
+
+    ui_inventory.GUI:Action_Custom(device, "actor_bag", nil, batch_disassembly_property_index)
+
+    coroutine.yield()
+
+    local expected = {}
+    table.insert(expected, {sec = "leatherman_tool", cond = 38/40})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_copper"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    table.insert(expected, {sec = "batteries_dead", cond = 1})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_capacitors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_transistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_resistors"})
+    table.insert(expected, {sec = "prt_i_copper"})
+    table.insert(expected, {sec = "prt_i_fasteners"})
+    table.insert(expected, {sec = "batteries_dead", cond = 0.4})
+    check_ruck(expected)
+    check_tips({
+        {msg = "st_dis_text_11 %c[255,51,255,102] device_pda_1 %c[255,250,250,250] st_dis_text_9 \\n- 4 prt_i_capacitors\\n- 4 prt_i_transistors\\n- 4 prt_i_resistors\\n- 2 prt_i_copper\\n- 2 prt_i_fasteners" .. (item_parts.batch_disassembly_supported and "\\n- 2 batteries_dead" or ""), icon = "leatherman_tool"}
+    })
+    check_fxs({"disassemble_metal_fast"})
+    check_statistics({"items_disassembled", "items_disassembled"})
+end
+
+
 function create_tests_batch_1()
     return {
         {item_by_leatherman, "item_by_leatherman"},
@@ -3593,6 +3722,10 @@ function test()
     table.insert(tests, {batch_outfit_threshold_none, "batch_outfit_threshold_none"})
     table.insert(tests, {non_batch_outfit_no_threshold_effect, "non_batch_outfit_no_threshold_effect"})
     table.insert(tests, {batch_weapon_threshold_partial, "batch_weapon_threshold_partial"})
+    table.insert(tests, {batch_item_threshold_all, "batch_item_threshold_all"})
+    table.insert(tests, {batch_item_threshold_partial, "batch_item_threshold_partial"})
+    table.insert(tests, {batch_outfit_threshold_none, "batch_outfit_threshold_none"})
+    table.insert(tests, {batch_item_with_battaries_threshold, "batch_item_with_battaries_threshold"})
 
     async_utils.run_async_timer_function(execute_tests, 
         {
