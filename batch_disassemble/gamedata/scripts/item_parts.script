@@ -44,6 +44,8 @@ batch_disassembly_item_condition_threshold = nil
 
 
 function init_settings()
+	printf("item_parts.init_settings() called")
+
 	max_con_obj = ini_parts:r_float_ex("settings","maximum_dissassembly_part_condition") or 0.999
 	min_con_obj = ini_parts:r_float_ex("settings","minimum_dissassembly_part_condition") or 0.001
 	max_con = ini_parts:r_float_ex("settings","maximum_evaluation_part_condition") or 99

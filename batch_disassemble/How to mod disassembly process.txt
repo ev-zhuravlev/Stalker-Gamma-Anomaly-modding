@@ -1,0 +1,35 @@
+Unfortunately this mod changes which function are needed to be overridden to mod disassembly process.
+
+Why this was needed:
+In original item_parts.script disassembly_item, disassembly_outfit and disassembly_weapon functions should have been overridden to change disassembly process. 
+The problem with these is that every one of them includes the following actions: 
+ - Removing item being disassembled, degrading tool, creating new parts
+ - Playing disassemble animation
+ - Sending news notification about disassembly result
+And override should have been provide all of them
+
+But with batch disassemble playing animation and news notification should happen only once per disassembly batch. 
+There was no way for other mods to modify parts creation and for item_parts.script to invoke this override without triggering animation and news notification for every single item in a batch. There was no possibility to override only parts creation.
+
+To fix this disassembly_item, disassembly_outfit and disassembly_weapon overrides are no longer do anything.
+Disassembly process is divided into the following steps:
+
+1. Prefiltering of the batch being disassembled. By overriding this group of functions some items could be removed from disassembly pack. Currently is used if condition threshold was specified.
+    - batch_disassembly_weapon_prefilter
+    - batch_disassembly_outfit_prefilter
+    - batch_disassembly_item_prefilter
+2. Disassembling each individual object. Value returned by these function is added to the results table that is later provided for result functions.
+    - disassembly_weapon_object
+    - disassembly_outfit_object
+    - disassembly_item_object
+3. Pre animation processing of disassembly results. Disassembly animation is being played here
+    - process_disassembly_weapon_results_pre_animation
+    - process_disassembly_outfit_results_pre_animation
+    - process_disassembly_item_results_pre_animation
+4. Post animation processing of disassembly results. Generating parts and sending news notification is happening here
+    - process_disassembly_weapon_results_post_animation
+    - process_disassembly_outfit_results_post_animation
+    - process_disassembly_item_results_post_animation
+
+Also overriding is possible for mods that want to initiate some action and continue disassembly in timer event after some delay.
+To do this functions that calling CreateTimeEvent should be rewritten as a single function without callbacks but with CreateTimeEvent calls changed to async_utils.yield_to_timer_task(<delay>, <ev_id>, <act_id>). You can look how this is done in item_parts.script itself where calls to CreateTimeEvent from original file were changed to async_utils.yield_to_timer_task. Part after async_utils.yield_to_timer_task will be called as a separate timer task after the specified delay. This allows disassemble process to wait until disassembly single object is finished even if it is using asynchronous time events.
